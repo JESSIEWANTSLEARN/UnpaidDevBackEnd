@@ -22,13 +22,20 @@ return [
     ),
 
     // Role-specific inactivity overrides.
-    // Super Admin receives a 24-hour inactivity window.
+    // Staff and admin roles receive a 24-hour inactivity window; System_User receives 1 minute.
     'role_idle_seconds' => [
-        'super_admin' => max(
-            60,
-            (int) env('SUPER_ADMIN_IDLE_SECONDS', 86400)
-        ),
-    ],
+    'super_admin' => 86400,
+    'Operations_Manager' => 86400,
+    'Purchasing_Manager' => 86400,
+    'Purchasing_Staff' => 86400,
+    'Warehouse_Admin' => 86400,
+    'Inventory_Controller' => 86400,
+    'Sales_Manager' => 86400,
+    'Sales_Staff' => 86400,
+    'User_Admin' => 86400,
+
+    'System_User' => 60,
+],
 
     /*
     |--------------------------------------------------------------------------
