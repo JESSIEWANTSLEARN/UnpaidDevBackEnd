@@ -32,6 +32,12 @@ Route::view('/signup-verify', 'react');
 Route::view('/login-otp', 'react');
 Route::view('/forgot-password', 'react');
 
+Route::get('/api/csrf-token', function () {
+    return response()->json([
+        'token' => csrf_token(),
+    ]);
+});
+
 // React role pages
 Route::view('/faq', 'react');
 // Customer dashboard must never render for a logged-out visitor.
