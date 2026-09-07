@@ -25,9 +25,9 @@ COPY . .
 
 RUN composer install --no-dev --optimize-autoloader
 
-# Copy Laravel public storage files directly into Apache public directory
-RUN mkdir -p public/storage \
-    && cp -R storage/app/public/. public/storage/
+# Link Laravel public storage so runtime uploads are publicly accessible
+RUN rm -rf public/storage \
+    && php artisan storage:link
 
 RUN npm install
 RUN npm run build
