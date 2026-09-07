@@ -43,4 +43,4 @@ RUN sed -ri -e 's!/var/www/html!/var/www/html/public!g' \
 
 EXPOSE 80
 
-CMD ["apache2-foreground"]
+CMD ["sh", "-c", "php artisan migrate --force --path=database/migrations/2026_09_02_190000_create_wbo_password_history_table.php && exec apache2-foreground"]
