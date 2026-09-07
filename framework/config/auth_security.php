@@ -54,14 +54,16 @@ return [
             'wbo_trusted_device'
         ),
 
-        // Leave null to automatically follow the current HTTPS request.
+        // Trusted-device cookies follow the main session cookie policy
+        // unless explicitly overridden.
         'secure_cookie' => env(
-            'TRUSTED_DEVICE_SECURE_COOKIE'
+            'TRUSTED_DEVICE_SECURE_COOKIE',
+            env('SESSION_SECURE_COOKIE')
         ),
 
         'same_site' => env(
             'TRUSTED_DEVICE_SAME_SITE',
-            'lax'
+            env('SESSION_SAME_SITE', 'lax')
         ),
     ],
     /*

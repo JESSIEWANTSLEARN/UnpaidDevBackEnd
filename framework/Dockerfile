@@ -25,9 +25,9 @@ COPY . .
 
 RUN composer install --no-dev --optimize-autoloader
 
-# Copy Laravel public storage files directly into Apache public directory
-RUN mkdir -p public/storage \
-    && cp -R storage/app/public/. public/storage/
+# Link Laravel public storage so runtime uploads are publicly accessible
+RUN rm -rf public/storage \
+    && php artisan storage:link
 
 RUN npm install
 RUN npm run build
@@ -43,4 +43,4 @@ RUN sed -ri -e 's!/var/www/html!/var/www/html/public!g' \
 
 EXPOSE 80
 
-CMD ["apache2-foreground"]
+CMD ["sh", "-c", "php artisan migrate --force --path=database/migrations/2026_09_02_190000_create_wbo_password_history_table.php && exec apache2-foreground"]
