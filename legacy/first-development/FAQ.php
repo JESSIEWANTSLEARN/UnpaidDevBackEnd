@@ -1,6 +1,6 @@
 <!--
 FAQ
-    - Frequently Asked Questions Page for Walang Brown Out Inventory and Ordering System
+  - Frequently Asked Questions Page for Walang Brown Out Inventory and Ordering System
 -->
 <!DOCTYPE html>
 <html lang="en">
