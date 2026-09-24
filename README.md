@@ -586,3 +586,11 @@ Render       = production hosting/web server
 Railway      = production MySQL database
 
 https://unpaiddevfrontend.onrender.com/login
+for diagram
+https://gitdiagram.com/jessiewantslearn/unpaiddevbackend
+https://gitdiagram.com/jessiewantslearn/unpaiddevfrontend 
+
+
+PROGRAM STRUCTURE FILE
+https://gitingest.com/JESSIEWANTSLEARN/UnpaidDevBackEnd
+https://gitingest.com/JESSIEWANTSLEARN/UnpaidDevFrontEnd
