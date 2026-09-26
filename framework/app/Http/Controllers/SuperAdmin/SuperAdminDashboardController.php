@@ -260,6 +260,15 @@ class SuperAdminDashboardController extends Controller
 
         // STOCK TOTALS
         $stockTotals = DB::table('WBO_Batches')
+            ->where(function ($query) {
+                $query
+                    ->whereNull('expiry_date')
+                    ->orWhereDate(
+                        'expiry_date',
+                        '>=',
+                        now()->toDateString()
+                    );
+            })
             ->select('product_id', DB::raw('SUM(current_quantity) AS available_stock'))
             ->groupBy('product_id');
 
@@ -280,7 +289,7 @@ class SuperAdminDashboardController extends Controller
             ->select(
                 'p.product_id', 'p.sku', 'p.name', 'p.description', 'c.name as category',
                 'p.supplier_id', 'p.abc_class', 'p.is_seasonal', 'p.is_visible', 'p.is_featured',
-                'p.unit_cost', 'p.unit_price', 'p.created_at', 'p.updated_at',
+                'p.unit_cost', 'p.unit_price', 'p.reorder_point', 'p.created_at', 'p.updated_at',
                 DB::raw('COALESCE(stock.available_stock, 0) AS available_stock'),
                 'images.image_id',
                 'images.image_path'
@@ -291,6 +300,7 @@ class SuperAdminDashboardController extends Controller
                 $product->available_stock = (int) $product->available_stock;
                 $product->unit_cost = (float) $product->unit_cost;
                 $product->unit_price = (float) $product->unit_price;
+                $product->reorder_point = max(1, (int) $product->reorder_point);
                 $product->is_seasonal = (bool) $product->is_seasonal;
                 $product->is_visible = (bool) $product->is_visible;
                 $product->is_featured = (bool) $product->is_featured;
@@ -710,7 +720,7 @@ class SuperAdminDashboardController extends Controller
         $metrics = [
             'total_products' => $products->count(),
             'total_stock' => (int) $products->sum('available_stock'),
-            'low_stock_items' => $products->filter(fn($product) => $product->available_stock > 0 && $product->available_stock <= $lowStockThreshold)->count(),
+            'low_stock_items' => $products->filter(fn($product) => $product->available_stock > 0 && $product->available_stock <= $product->reorder_point)->count(),
             'out_of_stock' => $products->filter(fn($product) => $product->available_stock <= 0)->count(),
             'total_suppliers' => $suppliers->count(),
             'pending_orders' => $orders->where('status', 'PENDING')->count(),

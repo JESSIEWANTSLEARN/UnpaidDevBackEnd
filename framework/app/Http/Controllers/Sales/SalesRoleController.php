@@ -370,6 +370,15 @@ class SalesRoleController extends Controller
                         '>',
                         0
                     )
+                    ->where(function ($query) {
+                        $query
+                            ->whereNull('expiry_date')
+                            ->orWhereDate(
+                                'expiry_date',
+                                '>=',
+                                now()->toDateString()
+                            );
+                    })
                     ->orderByRaw(
                         'CASE WHEN expiry_date IS NULL THEN 1 ELSE 0 END'
                     )

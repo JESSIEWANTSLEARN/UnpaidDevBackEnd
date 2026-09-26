@@ -90,11 +90,11 @@ class SuperAdminReportService
                 'title' => 'Products',
                 'headers' => [
                     'Product ID', 'SKU', 'Name', 'Category', 'Supplier', 'ABC Class',
-                    'Unit Cost', 'Unit Price', 'Stock', 'Visible', 'Featured'
+                    'Unit Cost', 'Unit Price', 'Stock', 'Reorder Point', 'Visible', 'Featured'
                 ],
                 'rows' => $this->productRows(),
                 'currency' => ['Unit Cost', 'Unit Price'],
-                'integer' => ['Product ID', 'Stock'],
+                'integer' => ['Product ID', 'Stock', 'Reorder Point'],
             ],
             'inventory' => [
                 'title' => 'Inventory',
@@ -176,6 +176,15 @@ class SuperAdminReportService
     private function summaryRows(): array
     {
         $stockTotals = DB::table('WBO_Batches')
+            ->where(function ($query) {
+                $query
+                    ->whereNull('expiry_date')
+                    ->orWhereDate(
+                        'expiry_date',
+                        '>=',
+                        now()->toDateString()
+                    );
+            })
             ->select('product_id', DB::raw('SUM(current_quantity) AS stock'))
             ->groupBy('product_id');
 
@@ -183,7 +192,7 @@ class SuperAdminReportService
             ->leftJoinSub($stockTotals, 'stock', function ($join) {
                 $join->on('stock.product_id', '=', 'p.product_id');
             })
-            ->select('p.product_id', DB::raw('COALESCE(stock.stock, 0) AS stock'))
+            ->select('p.product_id', 'p.reorder_point', DB::raw('COALESCE(stock.stock, 0) AS stock'))
             ->get();
 
         $monthStart = Carbon::now('Asia/Manila')->startOfMonth()->utc();
@@ -217,7 +226,7 @@ class SuperAdminReportService
             ['Generated At', Carbon::now('Asia/Manila')->format('Y-m-d H:i:s') . ' Asia/Manila'],
             ['Total Products', $products->count()],
             ['Total Stock', (int) $products->sum('stock')],
-            ['Low Stock Items', $products->filter(fn ($p) => (int) $p->stock > 0 && (int) $p->stock <= self::LOW_STOCK_THRESHOLD)->count()],
+            ['Low Stock Items', $products->filter(fn ($p) => (int) $p->stock > 0 && (int) $p->stock <= max(1, (int) $p->reorder_point))->count()],
             ['Out Of Stock', $products->filter(fn ($p) => (int) $p->stock <= 0)->count()],
             ['Total Suppliers', DB::table('WBO_Suppliers')->count()],
             ['Pending Sales Orders', DB::table('WBO_Orders')->where('status', 'PENDING')->count()],
@@ -233,6 +242,15 @@ class SuperAdminReportService
     private function productRows(): array
     {
         $stockTotals = DB::table('WBO_Batches')
+            ->where(function ($query) {
+                $query
+                    ->whereNull('expiry_date')
+                    ->orWhereDate(
+                        'expiry_date',
+                        '>=',
+                        now()->toDateString()
+                    );
+            })
             ->select('product_id', DB::raw('SUM(current_quantity) AS stock'))
             ->groupBy('product_id');
 
@@ -252,6 +270,7 @@ class SuperAdminReportService
                 'p.unit_cost',
                 'p.unit_price',
                 DB::raw('COALESCE(stock.stock, 0) AS stock'),
+                'p.reorder_point',
                 'p.is_visible',
                 'p.is_featured'
             )
@@ -267,6 +286,7 @@ class SuperAdminReportService
                 (float) $row->unit_cost,
                 (float) $row->unit_price,
                 (int) $row->stock,
+                (int) $row->reorder_point,
                 $row->is_visible ? 'Yes' : 'No',
                 $row->is_featured ? 'Yes' : 'No',
             ]))

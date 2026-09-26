@@ -453,6 +453,15 @@ class SystemUserController extends Controller
                             'product_id',
                             $product->product_id
                         )
+                        ->where(function ($query) {
+                            $query
+                                ->whereNull('expiry_date')
+                                ->orWhereDate(
+                                    'expiry_date',
+                                    '>=',
+                                    now()->toDateString()
+                                );
+                        })
                         ->sum('current_quantity');
 
                     if ($item['quantity'] > $stock) {

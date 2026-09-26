@@ -33,6 +33,7 @@ class SuperAdminCatalogController extends Controller
             'is_featured' => ['required', 'boolean'],
             'unit_cost' => ['required', 'numeric', 'min:0'],
             'unit_price' => ['required', 'numeric', 'min:0'],
+            'reorder_point' => ['required', 'integer', 'min:1', 'max:1000000'],
             'image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:5120'],
         ]);
 
@@ -52,6 +53,7 @@ class SuperAdminCatalogController extends Controller
                 'is_featured' => (bool) $validated['is_featured'],
                 'unit_cost' => $validated['unit_cost'],
                 'unit_price' => $validated['unit_price'],
+                'reorder_point' => $validated['reorder_point'],
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
@@ -129,6 +131,7 @@ class SuperAdminCatalogController extends Controller
             'is_featured' => ['required', 'boolean'],
             'unit_cost' => ['required', 'numeric', 'min:0'],
             'unit_price' => ['required', 'numeric', 'min:0'],
+            'reorder_point' => ['required', 'integer', 'min:1', 'max:1000000'],
             'image' => [
                 'nullable',
                 'image',
@@ -163,6 +166,7 @@ class SuperAdminCatalogController extends Controller
                     'is_featured' => (bool) $validated['is_featured'],
                     'unit_cost' => $validated['unit_cost'],
                     'unit_price' => $validated['unit_price'],
+                'reorder_point' => $validated['reorder_point'],
                     'updated_at' => now(),
                 ]);
 

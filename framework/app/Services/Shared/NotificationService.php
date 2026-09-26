@@ -98,6 +98,15 @@ class NotificationService
         }
 
         $stockTotals = DB::table('WBO_Batches')
+            ->where(function ($query) {
+                $query
+                    ->whereNull('expiry_date')
+                    ->orWhereDate(
+                        'expiry_date',
+                        '>=',
+                        now()->toDateString()
+                    );
+            })
             ->select(
                 'product_id',
                 DB::raw('SUM(current_quantity) AS available_stock')
@@ -119,6 +128,7 @@ class NotificationService
                 'p.product_id',
                 'p.name',
                 'p.is_visible',
+                'p.reorder_point',
                 DB::raw(
                     'COALESCE(stock.available_stock, 0) AS available_stock'
                 )
@@ -138,7 +148,8 @@ class NotificationService
                 }
 
                 $level = $this->stockLevel(
-                    (int) $product->available_stock
+                    (int) $product->available_stock,
+                    max(1, (int) $product->reorder_point)
                 );
 
                 $this->setState(
@@ -166,7 +177,10 @@ class NotificationService
             $productId = (int) $product->product_id;
             $isVisible = (bool) $product->is_visible;
             $stock = (int) $product->available_stock;
-            $level = $this->stockLevel($stock);
+            $level = $this->stockLevel(
+                $stock,
+                max(1, (int) $product->reorder_point)
+            );
 
             if (
                 $isVisible &&
@@ -401,8 +415,8 @@ class NotificationService
             self::INVENTORY_ROLES,
             'Orange',
             "Low stock: {$product->name}",
-            "{$product->name} has {$stock} unit(s) available. Low-stock threshold is " .
-                self::LOW_STOCK_THRESHOLD . '.',
+            "{$product->name} has {$stock} unit(s) available. Reorder point is " .
+                max(1, (int) $product->reorder_point) . '.',
             (int) $product->product_id
         );
     }
@@ -493,13 +507,15 @@ class NotificationService
         ]);
     }
 
-    private function stockLevel(int $stock): string
-    {
+    private function stockLevel(
+        int $stock,
+        int $reorderPoint
+    ): string {
         if ($stock <= 0) {
             return 'out';
         }
 
-        if ($stock <= self::LOW_STOCK_THRESHOLD) {
+        if ($stock <= max(1, $reorderPoint)) {
             return 'low';
         }
 

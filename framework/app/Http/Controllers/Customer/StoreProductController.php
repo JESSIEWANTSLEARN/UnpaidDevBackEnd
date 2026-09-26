@@ -20,7 +20,25 @@ class StoreProductController extends Controller
                 );
             },
         ])
-            ->withSum('batches as available_stock', 'current_quantity')
+            ->withSum(
+                [
+                    'batches as available_stock' =>
+                        function ($query) {
+                            $query->where(
+                                function ($batchQuery) {
+                                    $batchQuery
+                                        ->whereNull('expiry_date')
+                                        ->orWhereDate(
+                                            'expiry_date',
+                                            '>=',
+                                            now()->toDateString()
+                                        );
+                                }
+                            );
+                        },
+                ],
+                'current_quantity'
+            )
             ->where('is_visible', true)
             ->where('is_featured', true)
             ->orderBy('product_id')

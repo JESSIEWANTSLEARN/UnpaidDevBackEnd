@@ -16,6 +16,15 @@ class SalesDashboardService
     {
         $stockTotals =
             DB::table('WBO_Batches')
+                ->where(function ($query) {
+                    $query
+                        ->whereNull('expiry_date')
+                        ->orWhereDate(
+                            'expiry_date',
+                            '>=',
+                            now()->toDateString()
+                        );
+                })
                 ->select(
                     'product_id',
                     DB::raw(
@@ -50,6 +59,7 @@ class SalesDashboardService
                     'p.name',
                     'c.name as category',
                     'p.unit_price',
+                    'p.reorder_point',
                     DB::raw(
                         'COALESCE(stock.available_stock, 0) AS available_stock'
                     )
@@ -67,6 +77,11 @@ class SalesDashboardService
                     $product->unit_price =
                         (float)
                         $product->unit_price;
+                    $product->reorder_point =
+                        max(
+                            1,
+                            (int) $product->reorder_point
+                        );
                     $product->category =
                         $product->category ?:
                         'Uncategorized';
@@ -396,7 +411,7 @@ class SalesDashboardService
                     fn($product) =>
                         $product
                             ->available_stock <=
-                        self::LOW_STOCK_THRESHOLD
+                        $product->reorder_point
                 )
                 ->values();
 
@@ -487,9 +502,7 @@ class SalesDashboardService
                 'title' =>
                     'Fulfillment Stock Risk',
                 'message' =>
-                    "{$metrics['low_stock_products']} product(s) are at or below the " .
-                    self::LOW_STOCK_THRESHOLD .
-                    '-unit stock warning level.',
+                    "{$metrics['low_stock_products']} product(s) are at or below their configured reorder point.",
             ]);
         }
 
