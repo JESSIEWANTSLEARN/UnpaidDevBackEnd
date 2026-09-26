@@ -37,49 +37,42 @@ class SuperAdminCatalogController extends Controller
         ]);
 
         $categoryId = $this->resolveCategoryId($validated);
-        $imagePath = $request->hasFile('image')
-            ? $request->file('image')->store('products', 'public')
-            : null;
+        $imageValues = $this->productImageValues($request);
 
-        try {
-            $productId = DB::transaction(function () use ($validated, $categoryId, $imagePath) {
-                $productId = DB::table('WBO_Products')->insertGetId([
-                    'sku' => $validated['sku'],
-                    'name' => $validated['name'],
-                    'description' => $validated['description'] ?? null,
-                    'category_id' => $categoryId,
-                    'supplier_id' => $validated['supplier_id'] ?? null,
-                    'abc_class' => $validated['abc_class'],
-                    'is_seasonal' => (bool) $validated['is_seasonal'],
-                    'is_visible' => (bool) $validated['is_visible'],
-                    'is_featured' => (bool) $validated['is_featured'],
-                    'unit_cost' => $validated['unit_cost'],
-                    'unit_price' => $validated['unit_price'],
+        $productId = DB::transaction(function () use ($validated, $categoryId, $imageValues) {
+            $productId = DB::table('WBO_Products')->insertGetId([
+                'sku' => $validated['sku'],
+                'name' => $validated['name'],
+                'description' => $validated['description'] ?? null,
+                'category_id' => $categoryId,
+                'supplier_id' => $validated['supplier_id'] ?? null,
+                'abc_class' => $validated['abc_class'],
+                'is_seasonal' => (bool) $validated['is_seasonal'],
+                'is_visible' => (bool) $validated['is_visible'],
+                'is_featured' => (bool) $validated['is_featured'],
+                'unit_cost' => $validated['unit_cost'],
+                'unit_price' => $validated['unit_price'],
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            if ($imageValues) {
+                DB::table('WBO_ProductImages')->insert([
+                    'product_id' => $productId,
+                    'image_path' => null,
+                    'image_data' => $imageValues['image_data'],
+                    'mime_type' => $imageValues['mime_type'],
+                    'file_size' => $imageValues['file_size'],
+                    'alt_text' => $validated['name'],
+                    'is_primary' => true,
+                    'sort_order' => 0,
+                    'uploaded_by' => session('user_id'),
                     'created_at' => now(),
-                    'updated_at' => now(),
                 ]);
-
-                if ($imagePath) {
-                    DB::table('WBO_ProductImages')->insert([
-                        'product_id' => $productId,
-                        'image_path' => $imagePath,
-                        'alt_text' => $validated['name'],
-                        'is_primary' => true,
-                        'sort_order' => 0,
-                        'uploaded_by' => session('user_id'),
-                        'created_at' => now(),
-                    ]);
-                }
-
-                return $productId;
-            });
-        } catch (\Throwable $exception) {
-            if ($imagePath) {
-                Storage::disk('public')->delete($imagePath);
             }
 
-            throw $exception;
-        }
+            return $productId;
+        });
 
         $this->audit(
             $request,
@@ -145,86 +138,76 @@ class SuperAdminCatalogController extends Controller
         ]);
 
         $categoryId = $this->resolveCategoryId($validated);
-        $newImagePath = $request->hasFile('image')
-            ? $request->file('image')->store('products', 'public')
-            : null;
+        $newImageValues = $this->productImageValues($request);
 
         $oldImagePath = null;
 
-        try {
-            DB::transaction(function () use (
-                $validated,
-                $categoryId,
-                $newImagePath,
-                $productId,
-                &$oldImagePath
-            ) {
-                DB::table('WBO_Products')
-                    ->where('product_id', $productId)
-                    ->update([
-                        'sku' => $validated['sku'],
-                        'name' => $validated['name'],
-                        'description' =>
-                            $validated['description'] ?? null,
-                        'category_id' => $categoryId,
-                        'supplier_id' =>
-                            $validated['supplier_id'] ?? null,
-                        'abc_class' => $validated['abc_class'],
-                        'is_seasonal' =>
-                            (bool) $validated['is_seasonal'],
-                        'is_visible' =>
-                            (bool) $validated['is_visible'],
-                        'is_featured' =>
-                            (bool) $validated['is_featured'],
-                        'unit_cost' => $validated['unit_cost'],
-                        'unit_price' => $validated['unit_price'],
-                        'updated_at' => now(),
-                    ]);
+        DB::transaction(function () use (
+            $validated,
+            $categoryId,
+            $newImageValues,
+            $productId,
+            &$oldImagePath
+        ) {
+            DB::table('WBO_Products')
+                ->where('product_id', $productId)
+                ->update([
+                    'sku' => $validated['sku'],
+                    'name' => $validated['name'],
+                    'description' => $validated['description'] ?? null,
+                    'category_id' => $categoryId,
+                    'supplier_id' => $validated['supplier_id'] ?? null,
+                    'abc_class' => $validated['abc_class'],
+                    'is_seasonal' => (bool) $validated['is_seasonal'],
+                    'is_visible' => (bool) $validated['is_visible'],
+                    'is_featured' => (bool) $validated['is_featured'],
+                    'unit_cost' => $validated['unit_cost'],
+                    'unit_price' => $validated['unit_price'],
+                    'updated_at' => now(),
+                ]);
 
-                if (!$newImagePath) {
-                    return;
-                }
-
-                $primaryImage = DB::table('WBO_ProductImages')
-                    ->where('product_id', $productId)
-                    ->where('is_primary', true)
-                    ->orderBy('sort_order')
-                    ->first();
-
-                if ($primaryImage) {
-                    $oldImagePath = $primaryImage->image_path;
-
-                    DB::table('WBO_ProductImages')
-                        ->where('product_id', $productId)
-                        ->where('is_primary', true)
-                        ->update([
-                            'image_path' => $newImagePath,
-                            'alt_text' => $validated['name'],
-                            'uploaded_by' => session('user_id'),
-                        ]);
-                } else {
-                    DB::table('WBO_ProductImages')->insert([
-                        'product_id' => $productId,
-                        'image_path' => $newImagePath,
-                        'alt_text' => $validated['name'],
-                        'is_primary' => true,
-                        'sort_order' => 0,
-                        'uploaded_by' => session('user_id'),
-                        'created_at' => now(),
-                    ]);
-                }
-            });
-        } catch (\Throwable $exception) {
-            if ($newImagePath) {
-                Storage::disk('public')->delete($newImagePath);
+            if (!$newImageValues) {
+                return;
             }
 
-            throw $exception;
-        }
+            $primaryImage = DB::table('WBO_ProductImages')
+                ->select('image_id', 'image_path')
+                ->where('product_id', $productId)
+                ->where('is_primary', true)
+                ->orderBy('sort_order')
+                ->first();
+
+            if ($primaryImage) {
+                $oldImagePath = $primaryImage->image_path;
+
+                DB::table('WBO_ProductImages')
+                    ->where('image_id', $primaryImage->image_id)
+                    ->update([
+                        'image_path' => null,
+                        'image_data' => $newImageValues['image_data'],
+                        'mime_type' => $newImageValues['mime_type'],
+                        'file_size' => $newImageValues['file_size'],
+                        'alt_text' => $validated['name'],
+                        'uploaded_by' => session('user_id'),
+                    ]);
+            } else {
+                DB::table('WBO_ProductImages')->insert([
+                    'product_id' => $productId,
+                    'image_path' => null,
+                    'image_data' => $newImageValues['image_data'],
+                    'mime_type' => $newImageValues['mime_type'],
+                    'file_size' => $newImageValues['file_size'],
+                    'alt_text' => $validated['name'],
+                    'is_primary' => true,
+                    'sort_order' => 0,
+                    'uploaded_by' => session('user_id'),
+                    'created_at' => now(),
+                ]);
+            }
+        });
 
         if (
             $oldImagePath
-            && $oldImagePath !== $newImagePath
             && Storage::disk('public')->exists($oldImagePath)
         ) {
             Storage::disk('public')->delete($oldImagePath);
@@ -439,6 +422,30 @@ class SuperAdminCatalogController extends Controller
             'po_id' => $result['po_id'],
             'po_number' => $result['po_number'],
         ], 201);
+    }
+
+    private function productImageValues(Request $request): ?array
+    {
+        if (!$request->hasFile('image')) {
+            return null;
+        }
+
+        $file = $request->file('image');
+        $bytes = file_get_contents($file->getRealPath());
+
+        if ($bytes === false) {
+            throw ValidationException::withMessages([
+                'image' => ['Unable to read the selected product image.'],
+            ]);
+        }
+
+        return [
+            'image_data' => $bytes,
+            'mime_type' => $file->getMimeType()
+                ?: $file->getClientMimeType()
+                ?: 'application/octet-stream',
+            'file_size' => strlen($bytes),
+        ];
     }
 
     private function resolveCategoryId(array $validated): ?int

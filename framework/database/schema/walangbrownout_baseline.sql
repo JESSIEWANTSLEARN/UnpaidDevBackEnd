@@ -140,7 +140,10 @@ CREATE TABLE IF NOT EXISTS WBO_ProductImages (
 
     product_id INT NOT NULL,
 
-    image_path VARCHAR(255) NOT NULL,
+    image_path VARCHAR(255) NULL,
+    image_data MEDIUMBLOB NULL,
+    mime_type VARCHAR(50) NULL,
+    file_size INT UNSIGNED NULL,
     alt_text VARCHAR(150) NULL,
 
     is_primary BOOLEAN NOT NULL DEFAULT FALSE,

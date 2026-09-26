@@ -265,7 +265,11 @@ class SuperAdminDashboardController extends Controller
 
         // PRIMARY PRODUCT IMAGES
         $primaryImages = DB::table('WBO_ProductImages')
-            ->select('product_id', DB::raw('MAX(CASE WHEN is_primary = 1 THEN image_path END) AS image_path'))
+            ->select(
+                'product_id',
+                DB::raw('MAX(CASE WHEN is_primary = 1 THEN image_id END) AS image_id'),
+                DB::raw('MAX(CASE WHEN is_primary = 1 THEN image_path END) AS image_path')
+            )
             ->groupBy('product_id');
 
         // PRODUCTS
@@ -274,10 +278,12 @@ class SuperAdminDashboardController extends Controller
             ->leftJoinSub($stockTotals, 'stock', fn($join) => $join->on('stock.product_id', '=', 'p.product_id'))
             ->leftJoinSub($primaryImages, 'images', fn($join) => $join->on('images.product_id', '=', 'p.product_id'))
             ->select(
-                'p.product_id', 'p.sku', 'p.name', 'p.description', 'c.name as category', 
-                'p.supplier_id', 'p.abc_class', 'p.is_seasonal', 'p.is_visible', 'p.is_featured', 
+                'p.product_id', 'p.sku', 'p.name', 'p.description', 'c.name as category',
+                'p.supplier_id', 'p.abc_class', 'p.is_seasonal', 'p.is_visible', 'p.is_featured',
                 'p.unit_cost', 'p.unit_price', 'p.created_at', 'p.updated_at',
-                DB::raw('COALESCE(stock.available_stock, 0) AS available_stock'), 'images.image_path'
+                DB::raw('COALESCE(stock.available_stock, 0) AS available_stock'),
+                'images.image_id',
+                'images.image_path'
             )
             ->orderBy('p.product_id')
             ->get()
@@ -289,8 +295,17 @@ class SuperAdminDashboardController extends Controller
                 $product->is_visible = (bool) $product->is_visible;
                 $product->is_featured = (bool) $product->is_featured;
                 $product->category = $product->category ?: 'Uncategorized';
-                $product->image_url = $product->image_path ? Storage::url($product->image_path) : null;
-                unset($product->image_path);
+
+                if ($product->image_id) {
+                    $product->image_url = $product->image_path
+                        ? Storage::url($product->image_path)
+                        : '/api/store/product-images/' . $product->image_id;
+                } else {
+                    $product->image_url = null;
+                }
+
+                unset($product->image_id, $product->image_path);
+
                 return $product;
             });
 

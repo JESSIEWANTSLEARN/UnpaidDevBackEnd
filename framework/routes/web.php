@@ -149,6 +149,10 @@ Route::post('/api/session/forget-device', [SessionSecurityController::class, 'fo
 
 // Store / public API
 Route::get('/api/store/products', [StoreProductController::class, 'index']);
+Route::get(
+    '/api/store/product-images/{imageId}',
+    [StoreProductController::class, 'image']
+)->whereNumber('imageId');
 
 // System User API
 Route::get('/api/user/me', [SystemUserController::class, 'me']);
