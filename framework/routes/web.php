@@ -286,8 +286,16 @@ Route::put('/api/super-admin/notifications/{notificationId}', [SuperAdminControl
 Route::post('/api/super-admin/products', [SuperAdminCatalogController::class, 'storeProduct']);
 Route::put('/api/super-admin/products/{productId}', [SuperAdminCatalogController::class, 'updateProduct'])->whereNumber('productId');
 Route::post('/api/super-admin/categories', [SuperAdminCatalogController::class, 'storeCategory']);
+Route::put(
+    '/api/super-admin/categories/{categoryId}',
+    [SuperAdminCatalogController::class, 'updateCategory']
+)->whereNumber('categoryId');
 Route::post('/api/super-admin/stock-in', [SuperAdminCatalogController::class, 'stockIn']);
 Route::post('/api/super-admin/suppliers', [SuperAdminCatalogController::class, 'storeSupplier']);
+Route::put(
+    '/api/super-admin/suppliers/{supplierId}',
+    [SuperAdminCatalogController::class, 'updateSupplier']
+)->whereNumber('supplierId');
 Route::post('/api/super-admin/purchase-orders', [SuperAdminCatalogController::class, 'storePurchaseOrder']);
 
 // Super Admin backup / restore
