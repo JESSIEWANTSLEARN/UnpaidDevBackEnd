@@ -264,6 +264,65 @@ class SuperAdminCatalogController extends Controller
         ], 201);
     }
 
+
+    public function updateCategory(
+        Request $request,
+        int $categoryId
+    ): JsonResponse {
+        $this->authorizeSuperAdmin();
+
+        $category = DB::table('WBO_Categories')
+            ->where('category_id', $categoryId)
+            ->first();
+
+        if (!$category) {
+            return response()->json([
+                'message' => 'Category not found.',
+            ], 404);
+        }
+
+        $request->merge([
+            'name' => trim((string) $request->input('name', '')),
+        ]);
+
+        $validated = $request->validate([
+            'name' => [
+                'required',
+                'string',
+                'max:100',
+                Rule::unique('WBO_Categories', 'name')
+                    ->ignore($categoryId, 'category_id'),
+            ],
+            'description' => [
+                'nullable',
+                'string',
+                'max:255',
+            ],
+            'is_active' => [
+                'required',
+                'boolean',
+            ],
+        ]);
+
+        DB::table('WBO_Categories')
+            ->where('category_id', $categoryId)
+            ->update([
+                'name' => $validated['name'],
+                'description' => $validated['description'] ?? null,
+                'is_active' => (bool) $validated['is_active'],
+                'updated_at' => now(),
+            ]);
+
+        $this->audit(
+            $request,
+            'CATEGORY_UPDATED',
+            "Updated category #{$categoryId} ({$validated['name']})."
+        );
+
+        return response()->json([
+            'message' => 'Category updated successfully.',
+        ]);
+    }
     public function stockIn(Request $request): JsonResponse
     {
         $this->authorizeSuperAdmin();
@@ -358,6 +417,77 @@ class SuperAdminCatalogController extends Controller
         ], 201);
     }
 
+
+    public function updateSupplier(
+        Request $request,
+        int $supplierId
+    ): JsonResponse {
+        $this->authorizeSuperAdmin();
+
+        $supplier = DB::table('WBO_Suppliers')
+            ->where('supplier_id', $supplierId)
+            ->first();
+
+        if (!$supplier) {
+            return response()->json([
+                'message' => 'Supplier not found.',
+            ], 404);
+        }
+
+        $validated = $request->validate([
+            'name' => [
+                'required',
+                'string',
+                'max:150',
+            ],
+            'contact_number' => [
+                'nullable',
+                'string',
+                'max:20',
+            ],
+            'email' => [
+                'nullable',
+                'email',
+                'max:100',
+            ],
+            'address' => [
+                'nullable',
+                'string',
+                'max:255',
+            ],
+            'lead_time_days' => [
+                'required',
+                'integer',
+                'min:0',
+            ],
+            'supplier_status' => [
+                'required',
+                Rule::in(['ACTIVE', 'INACTIVE']),
+            ],
+        ]);
+
+        DB::table('WBO_Suppliers')
+            ->where('supplier_id', $supplierId)
+            ->update([
+                'name' => trim($validated['name']),
+                'contact_number' => $validated['contact_number'] ?? null,
+                'email' => $validated['email'] ?? null,
+                'address' => $validated['address'] ?? null,
+                'lead_time_days' => $validated['lead_time_days'],
+                'supplier_status' => $validated['supplier_status'],
+                'updated_at' => now(),
+            ]);
+
+        $this->audit(
+            $request,
+            'SUPPLIER_UPDATED',
+            "Updated supplier #{$supplierId} ({$validated['name']})."
+        );
+
+        return response()->json([
+            'message' => 'Supplier updated successfully.',
+        ]);
+    }
     public function storePurchaseOrder(Request $request): JsonResponse
     {
         $this->authorizeSuperAdmin();
