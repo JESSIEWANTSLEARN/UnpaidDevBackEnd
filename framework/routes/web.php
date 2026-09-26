@@ -206,6 +206,11 @@ Route::post(
     [RoleDashboardController::class, 'storePurchaseOrder']
 );
 
+
+Route::post(
+    '/api/role-dashboard/purchase-orders/{poId}/receive',
+    [RoleDashboardController::class, 'receivePurchaseOrder']
+)->whereNumber('poId');
 Route::put(
     '/api/role-dashboard/purchase-orders/{poId}/status',
     [RoleDashboardController::class, 'updatePurchaseOrderStatus']
