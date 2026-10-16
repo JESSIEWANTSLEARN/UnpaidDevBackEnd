@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS WBO_Products (
 
     unit_cost DECIMAL(10,2) NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
+    reorder_point INT UNSIGNED NOT NULL DEFAULT 10,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -140,7 +141,10 @@ CREATE TABLE IF NOT EXISTS WBO_ProductImages (
 
     product_id INT NOT NULL,
 
-    image_path VARCHAR(255) NOT NULL,
+    image_path VARCHAR(255) NULL,
+    image_data MEDIUMBLOB NULL,
+    mime_type VARCHAR(50) NULL,
+    file_size INT UNSIGNED NULL,
     alt_text VARCHAR(150) NULL,
 
     is_primary BOOLEAN NOT NULL DEFAULT FALSE,
@@ -280,6 +284,96 @@ CREATE TABLE IF NOT EXISTS WBO_OrderDetails (
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS WBO_ReturnRequests (
+    return_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    order_id INT NOT NULL,
+    customer_user_id INT NOT NULL,
+
+    status ENUM(
+        'REQUESTED',
+        'APPROVED',
+        'REJECTED',
+        'RECEIVED_FOR_INSPECTION',
+        'REFUND_PENDING',
+        'REFUNDED'
+    ) NOT NULL DEFAULT 'REQUESTED',
+
+    reason VARCHAR(500) NOT NULL,
+
+    inspection_disposition ENUM(
+        'RESTOCK',
+        'QUARANTINE',
+        'WRITE_OFF',
+        'RETURN_TO_SUPPLIER'
+    ) NULL,
+
+    inspection_notes VARCHAR(500) NULL,
+    refund_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    handled_by_user_id INT NULL,
+
+    requested_at DATETIME NOT NULL,
+    approved_at DATETIME NULL,
+    received_at DATETIME NULL,
+    inspected_at DATETIME NULL,
+    refunded_at DATETIME NULL,
+
+    created_at TIMESTAMP NULL,
+    updated_at TIMESTAMP NULL,
+
+    CONSTRAINT fk_wbo_return_order
+        FOREIGN KEY (order_id)
+        REFERENCES WBO_Orders(order_id)
+        ON DELETE RESTRICT,
+
+    CONSTRAINT fk_wbo_return_customer
+        FOREIGN KEY (customer_user_id)
+        REFERENCES WBO_Users(user_id)
+        ON DELETE RESTRICT,
+
+    CONSTRAINT fk_wbo_return_handler
+        FOREIGN KEY (handled_by_user_id)
+        REFERENCES WBO_Users(user_id)
+        ON DELETE SET NULL,
+
+    UNIQUE KEY uq_wbo_return_order (order_id),
+    INDEX idx_wbo_return_status (status),
+    INDEX idx_wbo_return_customer (customer_user_id)
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS WBO_ReturnItems (
+    return_item_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    return_id BIGINT UNSIGNED NOT NULL,
+    order_detail_id INT NOT NULL,
+    product_id INT NOT NULL,
+    quantity INT NOT NULL,
+    unit_price DECIMAL(10,2) NOT NULL,
+
+    CONSTRAINT fk_wbo_return_item_return
+        FOREIGN KEY (return_id)
+        REFERENCES WBO_ReturnRequests(return_id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_wbo_return_item_detail
+        FOREIGN KEY (order_detail_id)
+        REFERENCES WBO_OrderDetails(order_detail_id)
+        ON DELETE RESTRICT,
+
+    CONSTRAINT fk_wbo_return_item_product
+        FOREIGN KEY (product_id)
+        REFERENCES WBO_Products(product_id)
+        ON DELETE RESTRICT,
+
+    UNIQUE KEY uq_wbo_return_detail (
+        return_id,
+        order_detail_id
+    ),
+
+    INDEX idx_wbo_return_item_product (product_id)
+) ENGINE=InnoDB
+  DEFAULT CHARSET=utf8mb4
+  COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE IF NOT EXISTS WBO_PurchaseOrders (
     po_id INT AUTO_INCREMENT PRIMARY KEY,
 
@@ -739,6 +833,66 @@ CREATE TABLE IF NOT EXISTS WBO_NotificationState (
   DEFAULT CHARSET=utf8mb4
   COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS WBO_Conversations (
+    conversation_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    customer_user_id INT NOT NULL,
+    assigned_user_id INT NULL,
+    subject VARCHAR(150) NULL,
+    status ENUM('BOT','WAITING_STAFF','ACTIVE','CLOSED') NOT NULL DEFAULT 'BOT',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    closed_at DATETIME NULL,
+
+    CONSTRAINT fk_wbo_conv_customer
+        FOREIGN KEY (customer_user_id) REFERENCES WBO_Users(user_id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_wbo_conv_staff
+        FOREIGN KEY (assigned_user_id) REFERENCES WBO_Users(user_id)
+        ON DELETE SET NULL,
+
+    INDEX idx_wbo_conv_customer_status (customer_user_id, status),
+    INDEX idx_wbo_conv_staff_status (assigned_user_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS WBO_ConversationMessages (
+    message_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    conversation_id BIGINT UNSIGNED NOT NULL,
+    sender_user_id INT NULL,
+    sender_type ENUM('CUSTOMER','BOT','STAFF','SYSTEM') NOT NULL,
+    message TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_wbo_msg_conv
+        FOREIGN KEY (conversation_id) REFERENCES WBO_Conversations(conversation_id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_wbo_msg_sender
+        FOREIGN KEY (sender_user_id) REFERENCES WBO_Users(user_id)
+        ON DELETE SET NULL,
+
+    INDEX idx_wbo_msg_conv_created (conversation_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS WBO_ConversationTransfers (
+    transfer_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    conversation_id BIGINT UNSIGNED NOT NULL,
+    from_user_id INT NULL,
+    to_user_id INT NULL,
+    transfer_type ENUM('ESCALATED','ASSIGNED','REASSIGNED','CLOSED') NOT NULL,
+    note VARCHAR(255) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_wbo_transfer_conv
+        FOREIGN KEY (conversation_id) REFERENCES WBO_Conversations(conversation_id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_wbo_transfer_from
+        FOREIGN KEY (from_user_id) REFERENCES WBO_Users(user_id)
+        ON DELETE SET NULL,
+    CONSTRAINT fk_wbo_transfer_to
+        FOREIGN KEY (to_user_id) REFERENCES WBO_Users(user_id)
+        ON DELETE SET NULL,
+
+    INDEX idx_wbo_transfer_conv_created (conversation_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE IF NOT EXISTS WBO_FAQs (
     faq_id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
 

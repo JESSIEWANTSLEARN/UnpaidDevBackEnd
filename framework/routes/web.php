@@ -21,6 +21,9 @@ use App\Http\Controllers\SuperAdmin\SuperAdminController;
 use App\Http\Controllers\SuperAdmin\SuperAdminDashboardController;
 use App\Http\Controllers\Staff\RoleDashboardController;
 use App\Http\Controllers\Sales\SalesRoleController;
+use App\Http\Controllers\Support\SupportChatController;
+use App\Http\Controllers\Orders\ReturnController;
+use App\Http\Controllers\Imports\DataImportController;
 use App\Http\Controllers\UserAdmin\UserAdminController;
 use App\Http\Controllers\SuperAdmin\SuperAdminCatalogController;
 use App\Http\Controllers\SuperAdmin\SuperAdminBackupController;
@@ -154,11 +157,23 @@ Route::post(
 
 // Store / public API
 Route::get('/api/store/products', [StoreProductController::class, 'index']);
+Route::get(
+    '/api/store/product-images/{imageId}',
+    [StoreProductController::class, 'image']
+)->whereNumber('imageId');
 
 // System User API
 Route::get('/api/user/me', [SystemUserController::class, 'me']);
 Route::get('/api/user/orders', [SystemUserController::class, 'orders']);
 Route::post('/api/user/orders', [SystemUserController::class, 'placeOrder']);
+Route::put(
+    '/api/user/orders/{orderId}/cancel',
+    [SystemUserController::class, 'cancelOrder']
+)->whereNumber('orderId');
+Route::post(
+    '/api/user/orders/{orderId}/returns',
+    [ReturnController::class, 'customerCreate']
+)->whereNumber('orderId');
 Route::get('/api/user/notifications', [SystemUserController::class, 'notifications']);
 Route::put('/api/user/notifications/read-all', [SystemUserController::class, 'readAllNotifications']);
 Route::put('/api/user/notifications/{notificationId}/read', [SystemUserController::class, 'readNotification'])->whereNumber('notificationId');
@@ -192,6 +207,11 @@ Route::post(
     '/api/role-dashboard/adjust-stock',
     [RoleDashboardController::class, 'adjustStock']
 );
+
+Route::post(
+    '/api/role-dashboard/write-off',
+    [RoleDashboardController::class, 'writeOffStock']
+);
 Route::post(
     '/api/role-dashboard/suppliers',
     [RoleDashboardController::class, 'storeSupplier']
@@ -207,6 +227,11 @@ Route::post(
     [RoleDashboardController::class, 'storePurchaseOrder']
 );
 
+
+Route::post(
+    '/api/role-dashboard/purchase-orders/{poId}/receive',
+    [RoleDashboardController::class, 'receivePurchaseOrder']
+)->whereNumber('poId');
 Route::put(
     '/api/role-dashboard/purchase-orders/{poId}/status',
     [RoleDashboardController::class, 'updatePurchaseOrderStatus']
@@ -225,6 +250,41 @@ Route::put(
     '/api/sales-role/orders/{orderId}/status',
     [SalesRoleController::class, 'updateOrderStatus']
 )->whereNumber('orderId');
+
+Route::get(
+    '/api/sales-role/returns',
+    [ReturnController::class, 'staffIndex']
+);
+Route::put(
+    '/api/sales-role/returns/{returnId}',
+    [ReturnController::class, 'staffUpdate']
+)->whereNumber('returnId');
+
+// Cross-role return workflow. Backend action authorization still decides
+// which role may approve, receive, inspect, or refund.
+Route::get(
+    '/api/returns',
+    [ReturnController::class, 'staffIndex']
+);
+Route::put(
+    '/api/returns/{returnId}',
+    [ReturnController::class, 'staffUpdate']
+)->whereNumber('returnId');
+
+// Customer support / FAQ bot
+Route::get('/api/user/support/conversations', [SupportChatController::class, 'customerIndex']);
+Route::post('/api/user/support/conversations', [SupportChatController::class, 'customerStart']);
+Route::get('/api/user/support/conversations/{conversationId}', [SupportChatController::class, 'customerShow'])->whereNumber('conversationId');
+Route::post('/api/user/support/conversations/{conversationId}/messages', [SupportChatController::class, 'customerMessage'])->whereNumber('conversationId');
+Route::post('/api/user/support/conversations/{conversationId}/escalate', [SupportChatController::class, 'customerEscalate'])->whereNumber('conversationId');
+Route::post('/api/user/support/conversations/{conversationId}/close', [SupportChatController::class, 'customerClose'])->whereNumber('conversationId');
+
+// Sales support. Super Admin may read through preview=1 only.
+Route::get('/api/support/staff/conversations', [SupportChatController::class, 'staffIndex']);
+Route::get('/api/support/staff/conversations/{conversationId}', [SupportChatController::class, 'staffShow'])->whereNumber('conversationId');
+Route::post('/api/support/staff/conversations/{conversationId}/claim', [SupportChatController::class, 'staffClaim'])->whereNumber('conversationId');
+Route::post('/api/support/staff/conversations/{conversationId}/messages', [SupportChatController::class, 'staffMessage'])->whereNumber('conversationId');
+Route::post('/api/support/staff/conversations/{conversationId}/close', [SupportChatController::class, 'staffClose'])->whereNumber('conversationId');
 // User Admin API. Super Admin may GET with preview=1; writes require actual User_Admin.
 Route::get(
     '/api/user-admin/dashboard',
@@ -288,9 +348,31 @@ Route::put('/api/super-admin/notifications/{notificationId}', [SuperAdminControl
 Route::post('/api/super-admin/products', [SuperAdminCatalogController::class, 'storeProduct']);
 Route::put('/api/super-admin/products/{productId}', [SuperAdminCatalogController::class, 'updateProduct'])->whereNumber('productId');
 Route::post('/api/super-admin/categories', [SuperAdminCatalogController::class, 'storeCategory']);
+Route::put(
+    '/api/super-admin/categories/{categoryId}',
+    [SuperAdminCatalogController::class, 'updateCategory']
+)->whereNumber('categoryId');
 Route::post('/api/super-admin/stock-in', [SuperAdminCatalogController::class, 'stockIn']);
 Route::post('/api/super-admin/suppliers', [SuperAdminCatalogController::class, 'storeSupplier']);
+Route::put(
+    '/api/super-admin/suppliers/{supplierId}',
+    [SuperAdminCatalogController::class, 'updateSupplier']
+)->whereNumber('supplierId');
 Route::post('/api/super-admin/purchase-orders', [SuperAdminCatalogController::class, 'storePurchaseOrder']);
+
+// Role-based CSV / Excel data imports.
+Route::get(
+    '/api/data-imports',
+    [DataImportController::class, 'index']
+);
+Route::post(
+    '/api/data-imports/preview',
+    [DataImportController::class, 'preview']
+);
+Route::post(
+    '/api/data-imports',
+    [DataImportController::class, 'store']
+);
 
 // Super Admin backup / restore
 Route::post('/api/super-admin/backups', [SuperAdminBackupController::class, 'createBackup']);
@@ -363,3 +445,22 @@ Route::delete(
 // =========================================================
 // END PHASE 3 WEBSITE CONTENT
 // =========================================================
+
+
+// Public email-updates signup using the existing Brevo integration.
+Route::post(
+    '/api/public/newsletter/subscribe',
+    [\App\Http\Controllers\Website\NewsletterController::class, 'subscribe']
+)->middleware('throttle:5,1');
+
+// Customer wallet API.
+// Wallet balance changes are owned by Laravel, never React.
+Route::get(
+    '/api/user/wallet',
+    [\App\Http\Controllers\Customer\CustomerWalletController::class, 'show']
+);
+
+Route::post(
+    '/api/user/wallet/top-up',
+    [\App\Http\Controllers\Customer\CustomerWalletController::class, 'topUp']
+)->middleware('throttle:20,1');

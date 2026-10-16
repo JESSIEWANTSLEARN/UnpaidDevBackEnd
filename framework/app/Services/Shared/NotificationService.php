@@ -58,6 +58,36 @@ class NotificationService
         }
     }
 
+
+    public function recordWalletRefund(
+        int $orderId,
+        int $customerUserId,
+        string $amount
+    ): void {
+        if (!$this->ready()) {
+            return;
+        }
+
+        $stateKey =
+            "wallet-refund:{$orderId}:completed";
+
+        if ($this->hasState($stateKey)) {
+            return;
+        }
+
+        $this->insertNotification(
+            $customerUserId,
+            'Yellow',
+            "Wallet refund completed for order #{$orderId}",
+            "PHP {$amount} was returned to your Walang Brownout Wallet for order #{$orderId}."
+        );
+
+        $this->setState(
+            $stateKey,
+            'sent'
+        );
+    }
+
     public function syncCustomerOrderNotifications(int $userId): void
     {
         if (!$this->ready()) {
@@ -98,6 +128,15 @@ class NotificationService
         }
 
         $stockTotals = DB::table('WBO_Batches')
+            ->where(function ($query) {
+                $query
+                    ->whereNull('expiry_date')
+                    ->orWhereDate(
+                        'expiry_date',
+                        '>=',
+                        now()->toDateString()
+                    );
+            })
             ->select(
                 'product_id',
                 DB::raw('SUM(current_quantity) AS available_stock')
@@ -119,6 +158,7 @@ class NotificationService
                 'p.product_id',
                 'p.name',
                 'p.is_visible',
+                'p.reorder_point',
                 DB::raw(
                     'COALESCE(stock.available_stock, 0) AS available_stock'
                 )
@@ -138,7 +178,8 @@ class NotificationService
                 }
 
                 $level = $this->stockLevel(
-                    (int) $product->available_stock
+                    (int) $product->available_stock,
+                    max(1, (int) $product->reorder_point)
                 );
 
                 $this->setState(
@@ -166,7 +207,10 @@ class NotificationService
             $productId = (int) $product->product_id;
             $isVisible = (bool) $product->is_visible;
             $stock = (int) $product->available_stock;
-            $level = $this->stockLevel($stock);
+            $level = $this->stockLevel(
+                $stock,
+                max(1, (int) $product->reorder_point)
+            );
 
             if (
                 $isVisible &&
@@ -332,7 +376,14 @@ class NotificationService
         if (
             !in_array(
                 $status,
-                ['PENDING', 'CONFIRMED', 'FULFILLED', 'CANCELLED'],
+                [
+                    'PENDING',
+                    'CONFIRMED',
+                    'PROCESSING',
+                    'FULFILLED',
+                    'UNFULFILLED',
+                    'CANCELLED',
+                ],
                 true
             )
         ) {
@@ -347,10 +398,15 @@ class NotificationService
         }
 
         [$tier, $title, $message] = match ($status) {
-            'CONFIRMED' => [
+            'CONFIRMED', 'PROCESSING' => [
                 'Yellow',
-                "Order #{$orderId} confirmed",
-                "Your order #{$orderId} has been confirmed and is being prepared.",
+                "Order #{$orderId} processing",
+                "Your order #{$orderId} is being prepared and inventory has been reserved.",
+            ],
+            'UNFULFILLED' => [
+                'Red',
+                "Order #{$orderId} unfulfilled",
+                "Order #{$orderId} could not be fulfilled. Open My Orders for the latest status.",
             ],
             'FULFILLED' => [
                 'Yellow',
@@ -401,8 +457,8 @@ class NotificationService
             self::INVENTORY_ROLES,
             'Orange',
             "Low stock: {$product->name}",
-            "{$product->name} has {$stock} unit(s) available. Low-stock threshold is " .
-                self::LOW_STOCK_THRESHOLD . '.',
+            "{$product->name} has {$stock} unit(s) available. Reorder point is " .
+                max(1, (int) $product->reorder_point) . '.',
             (int) $product->product_id
         );
     }
@@ -493,13 +549,15 @@ class NotificationService
         ]);
     }
 
-    private function stockLevel(int $stock): string
-    {
+    private function stockLevel(
+        int $stock,
+        int $reorderPoint
+    ): string {
         if ($stock <= 0) {
             return 'out';
         }
 
-        if ($stock <= self::LOW_STOCK_THRESHOLD) {
+        if ($stock <= max(1, $reorderPoint)) {
             return 'low';
         }
 

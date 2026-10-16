@@ -156,6 +156,236 @@ class RoleDashboardController extends Controller
         ], 201);
     }
 
+
+    public function receivePurchaseOrder(
+        Request $request,
+        int $poId,
+        NotificationService $notifications
+    ): JsonResponse {
+        $role = $this->authorizeAction([
+            'Warehouse_Admin',
+        ]);
+
+        $request->merge([
+            'batch_number' =>
+                trim((string) $request->input('batch_number', '')),
+        ]);
+
+        $validated = $request->validate([
+            'po_detail_id' => [
+                'required',
+                'integer',
+                Rule::exists('WBO_PurchaseOrderDetails', 'po_detail_id'),
+            ],
+            'batch_number' => [
+                'required',
+                'string',
+                'max:50',
+            ],
+            'quantity_received' => [
+                'required',
+                'integer',
+                'min:1',
+            ],
+            'expiry_date' => [
+                'nullable',
+                'date',
+            ],
+        ]);
+
+        $result = DB::transaction(
+            function () use ($poId, $validated) {
+                $purchaseOrder = DB::table('WBO_PurchaseOrders')
+                    ->where('po_id', $poId)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$purchaseOrder) {
+                    abort(404, 'Purchase order not found.');
+                }
+
+                if (
+                    !in_array(
+                        $purchaseOrder->status,
+                        ['ORDERED', 'PARTIALLY_RECEIVED'],
+                        true
+                    )
+                ) {
+                    throw ValidationException::withMessages([
+                        'purchase_order' => [
+                            'Only ordered or partially received purchase orders can be received.',
+                        ],
+                    ]);
+                }
+
+                $detail = DB::table('WBO_PurchaseOrderDetails')
+                    ->where('po_id', $poId)
+                    ->where(
+                        'po_detail_id',
+                        $validated['po_detail_id']
+                    )
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$detail) {
+                    throw ValidationException::withMessages([
+                        'po_detail_id' => [
+                            'The selected purchase-order item was not found.',
+                        ],
+                    ]);
+                }
+
+                $remaining =
+                    (int) $detail->quantity_ordered -
+                    (int) $detail->quantity_received;
+
+                if ($remaining <= 0) {
+                    throw ValidationException::withMessages([
+                        'quantity_received' => [
+                            'This purchase-order item is already fully received.',
+                        ],
+                    ]);
+                }
+
+                if (
+                    (int) $validated['quantity_received'] >
+                    $remaining
+                ) {
+                    throw ValidationException::withMessages([
+                        'quantity_received' => [
+                            "Only {$remaining} unit(s) remain to be received for this item.",
+                        ],
+                    ]);
+                }
+
+                $duplicateBatch = DB::table('WBO_Batches')
+                    ->where(
+                        'product_id',
+                        $detail->product_id
+                    )
+                    ->where(
+                        'batch_number',
+                        $validated['batch_number']
+                    )
+                    ->exists();
+
+                if ($duplicateBatch) {
+                    throw ValidationException::withMessages([
+                        'batch_number' => [
+                            'That batch number already exists for this product.',
+                        ],
+                    ]);
+                }
+
+                $batchId = DB::table('WBO_Batches')
+                    ->insertGetId([
+                        'product_id' =>
+                            $detail->product_id,
+                        'batch_number' =>
+                            $validated['batch_number'],
+                        'quantity_received' =>
+                            $validated['quantity_received'],
+                        'current_quantity' =>
+                            $validated['quantity_received'],
+                        'received_date' => now(),
+                        'expiry_date' =>
+                            $validated['expiry_date'] ?? null,
+                    ]);
+
+                DB::table('WBO_Transactions')->insert([
+                    'batch_id' => $batchId,
+                    'transaction_type' => 'RECEIVE',
+                    'quantity_change' =>
+                        $validated['quantity_received'],
+                    'order_id' => null,
+                    'purchase_order_id' => $poId,
+                    'reference_note' =>
+                        "Received from purchase order {$purchaseOrder->po_number}",
+                    'performed_by_user_id' =>
+                        (int) session('user_id'),
+                    'timestamp' => now(),
+                ]);
+
+                $newReceived =
+                    (int) $detail->quantity_received +
+                    (int) $validated['quantity_received'];
+
+                DB::table('WBO_PurchaseOrderDetails')
+                    ->where(
+                        'po_detail_id',
+                        $detail->po_detail_id
+                    )
+                    ->update([
+                        'quantity_received' => $newReceived,
+                    ]);
+
+                $hasRemainingItems =
+                    DB::table('WBO_PurchaseOrderDetails')
+                        ->where('po_id', $poId)
+                        ->whereColumn(
+                            'quantity_received',
+                            '<',
+                            'quantity_ordered'
+                        )
+                        ->exists();
+
+                $newStatus =
+                    $hasRemainingItems
+                        ? 'PARTIALLY_RECEIVED'
+                        : 'RECEIVED';
+
+                DB::table('WBO_PurchaseOrders')
+                    ->where('po_id', $poId)
+                    ->update([
+                        'status' => $newStatus,
+                        'received_at' =>
+                            $newStatus === 'RECEIVED'
+                                ? now()
+                                : null,
+                    ]);
+
+                return [
+                    'po_number' =>
+                        (string) $purchaseOrder->po_number,
+                    'batch_id' => $batchId,
+                    'new_status' => $newStatus,
+                    'remaining_quantity' =>
+                        max(
+                            0,
+                            (int) $detail->quantity_ordered -
+                            $newReceived
+                        ),
+                ];
+            }
+        );
+
+        $this->audit(
+            $request,
+            'PURCHASE_ORDER_RECEIVED',
+            sprintf(
+                '%s received %d unit(s) from %s into batch %s. New PO status: %s.',
+                $this->roleLabel($role),
+                $validated['quantity_received'],
+                $result['po_number'],
+                $validated['batch_number'],
+                $result['new_status']
+            )
+        );
+
+        $notifications->syncOperationalAlerts();
+
+        return response()->json([
+            'message' =>
+                $result['new_status'] === 'RECEIVED'
+                    ? 'Purchase order fully received and inventory updated.'
+                    : 'Partial purchase-order delivery received and inventory updated.',
+            'po_number' => $result['po_number'],
+            'status' => $result['new_status'],
+            'batch_id' => $result['batch_id'],
+            'remaining_quantity' =>
+                $result['remaining_quantity'],
+        ], 201);
+    }
     public function adjustStock(
         Request $request,
         NotificationService $notifications
@@ -254,6 +484,155 @@ class RoleDashboardController extends Controller
         return response()->json([
             'message' => 'Inventory adjustment saved.',
             'new_quantity' => $result['new_quantity'],
+        ]);
+    }
+
+    public function writeOffStock(
+        Request $request,
+        NotificationService $notifications
+    ): JsonResponse {
+        $role = $this->authorizeAction([
+            'Inventory_Controller',
+        ]);
+
+        $request->merge([
+            'reference_note' =>
+                trim((string) $request->input('reference_note', '')),
+        ]);
+
+        $validated = $request->validate([
+            'batch_id' => [
+                'required',
+                'integer',
+                Rule::exists('WBO_Batches', 'batch_id'),
+            ],
+            'quantity' => [
+                'required',
+                'integer',
+                'min:1',
+            ],
+            'reason' => [
+                'required',
+                Rule::in([
+                    'DAMAGED',
+                    'MISSING',
+                    'EXPIRED',
+                ]),
+            ],
+            'reference_note' => [
+                'required',
+                'string',
+                'max:200',
+            ],
+        ]);
+
+        $result = DB::transaction(function () use ($validated) {
+            $batch = DB::table('WBO_Batches')
+                ->where('batch_id', $validated['batch_id'])
+                ->lockForUpdate()
+                ->first();
+
+            if (!$batch) {
+                throw ValidationException::withMessages([
+                    'batch_id' => [
+                        'The selected batch no longer exists.',
+                    ],
+                ]);
+            }
+
+            $currentQuantity =
+                (int) $batch->current_quantity;
+            $writeOffQuantity =
+                (int) $validated['quantity'];
+
+            if ($currentQuantity <= 0) {
+                throw ValidationException::withMessages([
+                    'quantity' => [
+                        'This batch has no stock left to write off.',
+                    ],
+                ]);
+            }
+
+            if ($writeOffQuantity > $currentQuantity) {
+                throw ValidationException::withMessages([
+                    'quantity' => [
+                        "Only {$currentQuantity} unit(s) remain in this batch.",
+                    ],
+                ]);
+            }
+
+            if ($validated['reason'] === 'EXPIRED') {
+                if (
+                    !$batch->expiry_date ||
+                    $batch->expiry_date >= now()->toDateString()
+                ) {
+                    throw ValidationException::withMessages([
+                        'reason' => [
+                            'Expired write-off can only be used for a batch whose expiry date has already passed.',
+                        ],
+                    ]);
+                }
+            }
+
+            $newQuantity =
+                $currentQuantity - $writeOffQuantity;
+
+            DB::table('WBO_Batches')
+                ->where('batch_id', $validated['batch_id'])
+                ->update([
+                    'current_quantity' => $newQuantity,
+                ]);
+
+            $note = sprintf(
+                '%s: %s',
+                $validated['reason'],
+                $validated['reference_note']
+            );
+
+            DB::table('WBO_Transactions')->insert([
+                'batch_id' => $validated['batch_id'],
+                'transaction_type' => 'WRITE_OFF',
+                'quantity_change' => -$writeOffQuantity,
+                'order_id' => null,
+                'purchase_order_id' => null,
+                'reference_note' => $note,
+                'performed_by_user_id' => (int) session('user_id'),
+                'timestamp' => now(),
+            ]);
+
+            return [
+                'batch_number' =>
+                    (string) $batch->batch_number,
+                'quantity' =>
+                    $writeOffQuantity,
+                'new_quantity' =>
+                    $newQuantity,
+                'reason' =>
+                    $validated['reason'],
+            ];
+        });
+
+        $this->audit(
+            $request,
+            'INVENTORY_WRITTEN_OFF',
+            sprintf(
+                '%s wrote off %d unit(s) from batch %s. Reason: %s. New quantity: %d. Note: %s',
+                $this->roleLabel($role),
+                $result['quantity'],
+                $result['batch_number'],
+                $result['reason'],
+                $result['new_quantity'],
+                $validated['reference_note']
+            )
+        );
+
+        $notifications->syncOperationalAlerts();
+
+        return response()->json([
+            'message' =>
+                'Inventory write-off recorded successfully.',
+            'new_quantity' =>
+                $result['new_quantity'],
         ]);
     }
 

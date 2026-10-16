@@ -34,7 +34,7 @@ return [
     'Sales_Staff' => 86400,
     'User_Admin' => 86400,
 
-    'System_User' => 60,
+    'System_User' => 60000,
 ],
 
     /*

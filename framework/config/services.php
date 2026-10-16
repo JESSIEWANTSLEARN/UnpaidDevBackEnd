@@ -38,4 +38,5 @@ return [
 
     'brevo' => [
         'key' => env('BREVO_API_KEY'),
+        'newsletter_list_id' => env('BREVO_NEWSLETTER_LIST_ID'),
     ],];

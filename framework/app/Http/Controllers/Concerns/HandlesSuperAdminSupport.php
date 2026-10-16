@@ -65,9 +65,12 @@ trait HandlesSuperAdminSupport
     protected function backupTables(): array
     {
         return [
-            'WBO_Users', 'WBO_Suppliers', 'WBO_Products', 'WBO_ProductImages', 'WBO_Batches',
-            'WBO_Orders', 'WBO_OrderDetails', 'WBO_Transactions', 'WBO_PurchaseOrders',
+            'WBO_Users', 'WBO_DataImports', 'WBO_DataImportErrors',
+            'WBO_Suppliers', 'WBO_Products', 'WBO_ProductImages', 'WBO_Batches',
+            'WBO_Orders', 'WBO_OrderDetails', 'WBO_ReturnRequests', 'WBO_ReturnItems',
+            'WBO_Transactions', 'WBO_PurchaseOrders',
             'WBO_Notifications', 'WBO_AuditLogs', 'WBO_SystemSettings',
+            'WBO_Conversations', 'WBO_ConversationMessages', 'WBO_ConversationTransfers',
         ];
     }
 

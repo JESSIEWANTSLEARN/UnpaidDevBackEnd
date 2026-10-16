@@ -24,6 +24,7 @@ class Product extends Model
         'is_featured',
         'unit_cost',
         'unit_price',
+        'reorder_point',
     ];
 
     protected $casts = [
@@ -32,6 +33,7 @@ class Product extends Model
         'is_featured' => 'boolean',
         'unit_cost' => 'decimal:2',
         'unit_price' => 'decimal:2',
+        'reorder_point' => 'integer',
     ];
 
     public function images(): HasMany

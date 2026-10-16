@@ -17,6 +17,10 @@ RUN apt-get update && apt-get install -y \
 
 RUN a2enmod rewrite
 
+# Allow Apache/PHP runtime user to read Render secret files
+RUN groupadd -g 1000 render-secrets
+RUN usermod -a -G render-secrets www-data
+
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www/html
@@ -43,4 +47,5 @@ RUN sed -ri -e 's!/var/www/html!/var/www/html/public!g' \
 
 EXPOSE 80
 
-CMD ["sh", "-c", "php artisan migrate --force --path=database/migrations/2026_09_02_190000_create_wbo_password_history_table.php && exec apache2-foreground"]
+
+CMD ["sh", "docker/start.sh"]

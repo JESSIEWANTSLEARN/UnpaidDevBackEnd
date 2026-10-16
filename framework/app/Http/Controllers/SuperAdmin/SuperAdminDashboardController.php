@@ -260,12 +260,25 @@ class SuperAdminDashboardController extends Controller
 
         // STOCK TOTALS
         $stockTotals = DB::table('WBO_Batches')
+            ->where(function ($query) {
+                $query
+                    ->whereNull('expiry_date')
+                    ->orWhereDate(
+                        'expiry_date',
+                        '>=',
+                        now()->toDateString()
+                    );
+            })
             ->select('product_id', DB::raw('SUM(current_quantity) AS available_stock'))
             ->groupBy('product_id');
 
         // PRIMARY PRODUCT IMAGES
         $primaryImages = DB::table('WBO_ProductImages')
-            ->select('product_id', DB::raw('MAX(CASE WHEN is_primary = 1 THEN image_path END) AS image_path'))
+            ->select(
+                'product_id',
+                DB::raw('MAX(CASE WHEN is_primary = 1 THEN image_id END) AS image_id'),
+                DB::raw('MAX(CASE WHEN is_primary = 1 THEN image_path END) AS image_path')
+            )
             ->groupBy('product_id');
 
         // PRODUCTS
@@ -274,10 +287,12 @@ class SuperAdminDashboardController extends Controller
             ->leftJoinSub($stockTotals, 'stock', fn($join) => $join->on('stock.product_id', '=', 'p.product_id'))
             ->leftJoinSub($primaryImages, 'images', fn($join) => $join->on('images.product_id', '=', 'p.product_id'))
             ->select(
-                'p.product_id', 'p.sku', 'p.name', 'p.description', 'c.name as category', 
-                'p.supplier_id', 'p.abc_class', 'p.is_seasonal', 'p.is_visible', 'p.is_featured', 
-                'p.unit_cost', 'p.unit_price', 'p.created_at', 'p.updated_at',
-                DB::raw('COALESCE(stock.available_stock, 0) AS available_stock'), 'images.image_path'
+                'p.product_id', 'p.sku', 'p.name', 'p.description', 'c.name as category',
+                'p.supplier_id', 'p.abc_class', 'p.is_seasonal', 'p.is_visible', 'p.is_featured',
+                'p.unit_cost', 'p.unit_price', 'p.reorder_point', 'p.created_at', 'p.updated_at',
+                DB::raw('COALESCE(stock.available_stock, 0) AS available_stock'),
+                'images.image_id',
+                'images.image_path'
             )
             ->orderBy('p.product_id')
             ->get()
@@ -285,12 +300,31 @@ class SuperAdminDashboardController extends Controller
                 $product->available_stock = (int) $product->available_stock;
                 $product->unit_cost = (float) $product->unit_cost;
                 $product->unit_price = (float) $product->unit_price;
+                $product->reorder_point = max(1, (int) $product->reorder_point);
                 $product->is_seasonal = (bool) $product->is_seasonal;
                 $product->is_visible = (bool) $product->is_visible;
                 $product->is_featured = (bool) $product->is_featured;
                 $product->category = $product->category ?: 'Uncategorized';
-                $product->image_url = $product->image_path ? Storage::url($product->image_path) : null;
-                unset($product->image_path);
+
+                if ($product->image_id) {
+                    $version = $product->updated_at
+                        ? '?v=' . rawurlencode(
+                            (string) $product->updated_at
+                        )
+                        : '';
+
+                    $product->image_url = $product->image_path
+                        ? Storage::url($product->image_path)
+                            . $version
+                        : '/api/store/product-images/'
+                            . $product->image_id
+                            . $version;
+                } else {
+                    $product->image_url = null;
+                }
+
+                unset($product->image_id, $product->image_path);
+
                 return $product;
             });
 
@@ -726,7 +760,7 @@ class SuperAdminDashboardController extends Controller
         $metrics = [
             'total_products' => $products->count(),
             'total_stock' => (int) $products->sum('available_stock'),
-            'low_stock_items' => $products->filter(fn($product) => $product->available_stock > 0 && $product->available_stock <= $lowStockThreshold)->count(),
+            'low_stock_items' => $products->filter(fn($product) => $product->available_stock > 0 && $product->available_stock <= $product->reorder_point)->count(),
             'out_of_stock' => $products->filter(fn($product) => $product->available_stock <= 0)->count(),
             'total_suppliers' => $suppliers->count(),
             'pending_orders' => $orders->where('status', 'PENDING')->count(),

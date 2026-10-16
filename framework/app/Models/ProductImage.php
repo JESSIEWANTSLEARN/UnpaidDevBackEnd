@@ -16,14 +16,22 @@ class ProductImage extends Model
     protected $fillable = [
         'product_id',
         'image_path',
+        'image_data',
+        'mime_type',
+        'file_size',
         'alt_text',
         'is_primary',
         'sort_order',
         'uploaded_by',
     ];
 
+    protected $hidden = [
+        'image_data',
+    ];
+
     protected $casts = [
         'is_primary' => 'boolean',
+        'file_size' => 'integer',
     ];
 
     public function product(): BelongsTo

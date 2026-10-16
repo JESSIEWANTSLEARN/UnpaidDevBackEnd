@@ -24,6 +24,15 @@ class OperationalDashboardService
     public function build(string $role, bool $isPreview): array
     {
         $stockTotals = DB::table('WBO_Batches')
+            ->where(function ($query) {
+                $query
+                    ->whereNull('expiry_date')
+                    ->orWhereDate(
+                        'expiry_date',
+                        '>=',
+                        now()->toDateString()
+                    );
+            })
             ->select(
                 'product_id',
                 DB::raw(
@@ -60,6 +69,7 @@ class OperationalDashboardService
                 'p.sku',
                 'p.name',
                 'p.supplier_id',
+                'p.reorder_point',
                 'c.name as category',
                 's.name as supplier_name',
                 DB::raw(
@@ -71,6 +81,17 @@ class OperationalDashboardService
             ->map(function ($product) {
                 $product->available_stock =
                     (int) $product->available_stock;
+                $product->reorder_point =
+                    max(1, (int) $product->reorder_point);
+                $product->recommended_reorder_quantity =
+                    $product->available_stock <=
+                        $product->reorder_point
+                        ? max(
+                            ($product->reorder_point * 2) -
+                                $product->available_stock,
+                            1
+                        )
+                        : 0;
                 $product->supplier_id =
                     $product->supplier_id === null
                         ? null
@@ -323,7 +344,7 @@ class OperationalDashboardService
                 fn($product) =>
                     $product->available_stock > 0 &&
                     $product->available_stock <=
-                        self::LOW_STOCK_THRESHOLD
+                        $product->reorder_point
             )
             ->values();
 
@@ -338,7 +359,7 @@ class OperationalDashboardService
             ->filter(
                 fn($product) =>
                     $product->available_stock <=
-                        self::LOW_STOCK_THRESHOLD
+                        $product->reorder_point
             )
             ->sortBy('available_stock')
             ->values();
@@ -469,9 +490,7 @@ class OperationalDashboardService
                 'tone' => 'warning',
                 'title' => 'Low Stock',
                 'message' =>
-                    "{$metrics['low_stock_items']} product(s) are at or below the " .
-                    self::LOW_STOCK_THRESHOLD .
-                    '-unit warning level.',
+                    "{$metrics['low_stock_items']} product(s) are at or below their configured reorder point.",
             ]);
         }
 

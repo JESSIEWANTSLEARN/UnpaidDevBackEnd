@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Sales;
 
 use App\Http\Controllers\Controller;
 use App\Services\Shared\NotificationService;
+use App\Services\Customer\CustomerWalletService;
 use App\Services\Sales\SalesDashboardService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -53,7 +54,8 @@ class SalesRoleController extends Controller
     public function updateOrderStatus(
         Request $request,
         int $orderId,
-        NotificationService $notifications
+        NotificationService $notifications,
+        CustomerWalletService $wallets
     ): JsonResponse {
         $role = $this->authorizeAction();
 
@@ -61,6 +63,7 @@ class SalesRoleController extends Controller
             'action' => [
                 'required',
                 Rule::in([
+                    'verify_payment',
                     'process',
                     'fulfill',
                     'unfulfill',
@@ -75,7 +78,8 @@ class SalesRoleController extends Controller
             function () use (
                 $orderId,
                 $action,
-                $role
+                $role,
+                $wallets
             ) {
                 $order =
                     DB::table('WBO_Orders')
@@ -90,11 +94,67 @@ class SalesRoleController extends Controller
                     abort(404, 'Order not found.');
                 }
 
+                if ($action === 'verify_payment') {
+                    if (
+                        $order->payment_method ===
+                        'CASH_ON_DELIVERY'
+                    ) {
+                        throw ValidationException::withMessages([
+                            'action' => [
+                                'Cash on Delivery does not require payment verification.',
+                            ],
+                        ]);
+                    }
+
+                    if (
+                        $order->payment_status !==
+                        'AWAITING_VERIFICATION'
+                    ) {
+                        throw ValidationException::withMessages([
+                            'action' => [
+                                'Only payments awaiting verification can be verified.',
+                            ],
+                        ]);
+                    }
+
+                    DB::table('WBO_Orders')
+                        ->where(
+                            'order_id',
+                            $orderId
+                        )
+                        ->update([
+                            'payment_status' =>
+                                'PAID',
+                            'paid_at' => now(),
+                        ]);
+
+                    return [
+                        'status' =>
+                            $order->status,
+                        'message' =>
+                            "Payment for order #{$orderId} verified.",
+                        'audit_action' =>
+                            'ORDER_PAYMENT_VERIFIED',
+                    ];
+                }
+
                 if ($action === 'process') {
                     if ($order->status !== 'PENDING') {
                         throw ValidationException::withMessages([
                             'action' => [
                                 'Only pending orders can be moved to processing.',
+                            ],
+                        ]);
+                    }
+
+                    if (
+                        $order->payment_method !==
+                            'CASH_ON_DELIVERY' &&
+                        $order->payment_status !== 'PAID'
+                    ) {
+                        throw ValidationException::withMessages([
+                            'action' => [
+                                'Verify the demo online payment before processing this order.',
                             ],
                         ]);
                     }
@@ -183,6 +243,23 @@ class SalesRoleController extends Controller
                                 null,
                         ]);
 
+                    if (
+                        $order->payment_method ===
+                        'CASH_ON_DELIVERY'
+                    ) {
+                        DB::table('WBO_Orders')
+                            ->where(
+                                'order_id',
+                                $orderId
+                            )
+                            ->update([
+                                'payment_status' =>
+                                    'PAID',
+                                'paid_at' =>
+                                    now(),
+                            ]);
+                    }
+
                     return [
                         'status' =>
                             'FULFILLED',
@@ -221,6 +298,19 @@ class SalesRoleController extends Controller
                         );
                     }
 
+                    $walletRefund = null;
+
+                    if (
+                        $order->payment_method === 'WALLET' &&
+                        $order->payment_status === 'PAID'
+                    ) {
+                        $walletRefund =
+                            $wallets->refundOrder(
+                                (int) $order->customer_user_id,
+                                $orderId
+                            );
+                    }
+
                     DB::table('WBO_Orders')
                         ->where(
                             'order_id',
@@ -233,15 +323,33 @@ class SalesRoleController extends Controller
                                 null,
                             'cancelled_at' =>
                                 null,
+                            'payment_status' =>
+                                $walletRefund
+                                    ? 'REFUNDED'
+                                    : 'CANCELLED',
+                            'paid_at' =>
+                                $walletRefund
+                                    ? $order->paid_at
+                                    : null,
                         ]);
 
                     return [
                         'status' =>
                             'UNFULFILLED',
                         'message' =>
-                            "Order #{$orderId} marked unfulfilled.",
+                            $walletRefund
+                                ? sprintf(
+                                    'Order #%d marked unfulfilled. PHP %s was returned to the customer wallet.',
+                                    $orderId,
+                                    $walletRefund['amount']
+                                )
+                                : "Order #{$orderId} marked unfulfilled.",
                         'audit_action' =>
                             'ORDER_UNFULFILLED',
+                        'wallet_refund_amount' =>
+                            $walletRefund['amount'] ?? null,
+                        'customer_user_id' =>
+                            (int) $order->customer_user_id,
                     ];
                 }
 
@@ -272,6 +380,19 @@ class SalesRoleController extends Controller
                     );
                 }
 
+                $walletRefund = null;
+
+                if (
+                    $order->payment_method === 'WALLET' &&
+                    $order->payment_status === 'PAID'
+                ) {
+                    $walletRefund =
+                        $wallets->refundOrder(
+                            (int) $order->customer_user_id,
+                            $orderId
+                        );
+                }
+
                 DB::table('WBO_Orders')
                     ->where(
                         'order_id',
@@ -284,16 +405,35 @@ class SalesRoleController extends Controller
                             null,
                         'cancelled_at' =>
                             now(),
+                        'payment_status' =>
+                            $walletRefund
+                                ? 'REFUNDED'
+                                : 'CANCELLED',
+                        'paid_at' =>
+                            $walletRefund
+                                ? $order->paid_at
+                                : null,
                     ]);
 
                 return [
                     'status' =>
                         'CANCELLED',
                     'message' =>
-                        "Order #{$orderId} cancelled.",
+                        $walletRefund
+                            ? sprintf(
+                                'Order #%d cancelled. PHP %s was returned to the customer wallet.',
+                                $orderId,
+                                $walletRefund['amount']
+                            )
+                            : "Order #{$orderId} cancelled.",
                     'audit_action' =>
                         'ORDER_CANCELLED',
+                    'wallet_refund_amount' =>
+                        $walletRefund['amount'] ?? null,
+                    'customer_user_id' =>
+                        (int) $order->customer_user_id,
                 ];
+
             }
         );
 
@@ -307,6 +447,36 @@ class SalesRoleController extends Controller
                 $result['status']
             )
         );
+
+        if (!empty($result['wallet_refund_amount'])) {
+            $this->audit(
+                $request,
+                'WALLET_REFUND',
+                sprintf(
+                    'PHP %s returned to customer wallet for order #%d.',
+                    $result['wallet_refund_amount'],
+                    $orderId
+                )
+            );
+        }
+        $customerUserId = (int) DB::table('WBO_Orders')
+            ->where('order_id', $orderId)
+            ->value('customer_user_id');
+
+        if ($customerUserId > 0) {
+            $notifications->syncCustomerOrderNotifications(
+                $customerUserId
+            );
+
+            if (!empty($result['wallet_refund_amount'])) {
+                $notifications->recordWalletRefund(
+                    $orderId,
+                    $customerUserId,
+                    (string)
+                        $result['wallet_refund_amount']
+                );
+            }
+        }
 
         // Stock reservation/release may change operational alert state.
         $notifications->syncOperationalAlerts();
@@ -370,6 +540,15 @@ class SalesRoleController extends Controller
                         '>',
                         0
                     )
+                    ->where(function ($query) {
+                        $query
+                            ->whereNull('expiry_date')
+                            ->orWhereDate(
+                                'expiry_date',
+                                '>=',
+                                now()->toDateString()
+                            );
+                    })
                     ->orderByRaw(
                         'CASE WHEN expiry_date IS NULL THEN 1 ELSE 0 END'
                     )
