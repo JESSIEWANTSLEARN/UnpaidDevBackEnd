@@ -10,11 +10,18 @@ class StoreProductController extends Controller
 {
     public function index()
     {
-        $products = Product::with('primaryImage')
+        $products = Product::query()
+            ->leftJoin(
+                'WBO_Categories as product_categories',
+                'product_categories.category_id', '=',
+                'WBO_Products.category_id'
+            )
+            ->select('WBO_Products.*', 'product_categories.name as category_name')
+            ->with('primaryImage')
             ->withSum('batches as available_stock', 'current_quantity')
-            ->where('is_visible', true)
-            ->where('is_featured', true)
-            ->orderBy('product_id')
+            ->where('WBO_Products.is_visible', true)
+            ->where('WBO_Products.is_featured', true)
+            ->orderBy('WBO_Products.product_id')
             ->get()
             ->map(function ($product) {
 
@@ -23,7 +30,7 @@ class StoreProductController extends Controller
                     'sku' => $product->sku,
                     'name' => $product->name,
                     'description' => $product->description,
-                    'category' => $product->category,
+                    'category' => $product->category_name ?: $product->category,
                     'price' => (float) $product->unit_price,
 
                     'available_stock' =>
