@@ -148,18 +148,33 @@ class RolePermissionHandshakeTest extends TestCase
         $this->putJson('/api/returns/999', ['action'=>'refund'])->assertNotFound();
     }
 
-    public function test_operations_manager_can_preview_products_but_cannot_import_them(): void
+    public function test_operations_manager_can_import_assigned_products_without_extra_approval(): void
     {
         $this->withoutMiddleware(EnforceIdleSession::class);
-        Schema::create('WBO_DataImports', function (Blueprint $t) { $t->id('import_id'); $t->string('import_type'); $t->integer('uploaded_by_user_id'); $t->timestamp('created_at')->nullable(); });
-        Schema::create('WBO_DataImportErrors', function (Blueprint $t) { $t->id('import_error_id'); $t->integer('import_id'); });
+        Schema::create('WBO_DataImports', function (Blueprint $t) {
+            $t->id('import_id');
+            foreach (['uploaded_by_user_id', 'total_rows', 'successful_rows', 'failed_rows'] as $column) $t->integer($column)->default(0);
+            foreach (['import_type', 'file_type', 'original_filename', 'stored_file_path', 'status'] as $column) $t->string($column)->nullable();
+            foreach (['started_at', 'completed_at', 'created_at'] as $column) $t->timestamp($column)->nullable();
+        });
+        Schema::create('WBO_DataImportErrors', function (Blueprint $t) {
+            $t->id('import_error_id');
+            $t->integer('import_id');
+            $t->integer('row_number')->nullable();
+            foreach (['sheet_name', 'field_name', 'raw_value', 'raw_row_data', 'error_message'] as $column) $t->text($column)->nullable();
+            $t->timestamp('created_at')->nullable();
+        });
         $this->actor('Operations_Manager');
         $this->withSession(['logged_in'=>true, 'user_id'=>1, 'role'=>'Operations_Manager']);
-        $this->getJson('/api/data-imports')->assertOk()->assertJsonPath('can_confirm', false)->assertJsonPath('allowed_types.0', 'PRODUCTS');
+        $this->getJson('/api/data-imports')->assertOk()->assertJsonPath('can_confirm', true)->assertJsonPath('allowed_types.0', 'PRODUCTS');
         $file = fn () => UploadedFile::fake()->createWithContent('products.csv', "sku,name,unit_cost,unit_price\nBAD,,,foo\n");
         $this->postJson('/api/data-imports/preview', ['import_type'=>'PRODUCTS', 'file'=>$file()])->assertOk()->assertJsonPath('preview.invalid_rows', 1);
-        $this->postJson('/api/data-imports', ['import_type'=>'PRODUCTS', 'file'=>$file()])->assertForbidden();
-        $this->assertSame(0, DB::table('WBO_DataImports')->count());
+        $this->postJson('/api/data-imports', ['import_type'=>'PRODUCTS', 'file'=>$file()])
+            ->assertCreated()
+            ->assertJsonPath('import.status', 'FAILED')
+            ->assertJsonPath('import.failed_rows', 1);
+        $this->assertSame(1, DB::table('WBO_DataImports')->count());
+        $this->postJson('/api/data-imports', ['import_type'=>'SUPPLIERS', 'file'=>$file()])->assertForbidden();
         $this->withSession(['logged_in'=>true, 'user_id'=>1, 'role'=>'super_admin']);
         $this->getJson('/api/data-imports')->assertOk()->assertJsonPath('can_confirm', true);
     }
@@ -233,6 +248,7 @@ class RolePermissionHandshakeTest extends TestCase
     public function test_expired_session_is_rejected(): void
     {
         $user = $this->actor('System_User'); $request = $this->sessionRequest(); $service = app(AuthSessionService::class);
+        $this->assertSame(60, $service->idleSeconds('System_User'));
         $service->start($request, $user);
         $request->session()->put('last_activity', now()->timestamp - $service->idleSeconds('System_User') - 1);
         $this->assertSame('idle_timeout', $service->validate($request));

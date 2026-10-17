@@ -149,8 +149,7 @@ class DataImportController extends Controller
             'allowed_types' =>
                 $access['allowed_types'],
             'can_confirm' =>
-                !$access['preview'] &&
-                $access['role'] !== 'Operations_Manager',
+                !$access['preview'],
             'imports' => $payload,
         ]);
     }
@@ -426,13 +425,7 @@ class DataImportController extends Controller
     private function authorizeWrite(
         string $type
     ): WBOUser {
-        $actor = $this->authorizePreview($type);
-
-        if (session('role') === 'Operations_Manager') {
-            abort(403, 'Operations Manager can validate product files; Super Admin confirms product imports.');
-        }
-
-        return $actor;
+        return $this->authorizePreview($type);
     }
 
     private function authorizePreview(
