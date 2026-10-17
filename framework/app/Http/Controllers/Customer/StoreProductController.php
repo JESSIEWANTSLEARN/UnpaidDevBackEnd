@@ -11,6 +11,7 @@ class StoreProductController extends Controller
 {
     public function index()
     {
+        $categories = DB::table('WBO_Categories')->pluck('name', 'category_id');
         $products = Product::with([
             'primaryImage' => function ($query) {
                 $query->select(
@@ -43,13 +44,13 @@ class StoreProductController extends Controller
             ->where('is_featured', true)
             ->orderBy('product_id')
             ->get()
-            ->map(function ($product) {
+            ->map(function ($product) use ($categories) {
                 return [
                     'product_id' => $product->product_id,
                     'sku' => $product->sku,
                     'name' => $product->name,
                     'description' => $product->description,
-                    'category' => $product->category,
+                    'category' => $categories->get($product->category_id) ?: $product->category,
                     'price' => (float) $product->unit_price,
                     'available_stock' =>
                         (int) ($product->available_stock ?? 0),
