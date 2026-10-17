@@ -431,9 +431,10 @@ trait ReturnWorkflowHelpers
     ): WBOUser {
         $allowedRoles = match ($action) {
             'approve',
-            'reject',
-            'refund' =>
+            'reject' =>
                 self::SALES_ROLES,
+            'refund' =>
+                ['Sales_Manager'],
             'receive' =>
                 ['Warehouse_Admin'],
             'inspect' =>
