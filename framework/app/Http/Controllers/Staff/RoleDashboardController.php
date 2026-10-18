@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Staff;
 use App\Http\Controllers\Controller;
 use App\Services\Shared\NotificationService;
 use App\Services\Inventory\InventoryUpdateService;
+use App\Support\DashboardRefreshScope;
 use App\Services\Staff\OperationalDashboardService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -48,13 +49,14 @@ class RoleDashboardController extends Controller
     ): JsonResponse {
         $isPreview = $this->authorizeRead($request, $role);
 
-        if (!$isPreview) {
+        $sections = DashboardRefreshScope::read($request, [
+            'products', 'suppliers', 'batches', 'transactions', 'purchase_orders', 'orders',
+        ]);
+        if (!$isPreview && ($sections === null || in_array('products', $sections, true))) {
             $notifications->syncOperationalAlerts();
         }
-
-        return response()->json(
-            $dashboard->build($role, $isPreview)
-        );
+        $data = $dashboard->build($role, $isPreview, $sections);
+        return response()->json($sections === null ? $data : ['dashboard_update' => $data]);
     }
 
     // =========================================================

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Services\Shared\NotificationService;
 use App\Services\Customer\CustomerWalletService;
 use App\Services\Sales\SalesDashboardService;
+use App\Support\DashboardRefreshScope;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -43,12 +44,9 @@ class SalesRoleController extends Controller
         $isPreview =
             $this->authorizeRead($request, $role);
 
-        return response()->json(
-            $dashboard->build(
-                $role,
-                $isPreview
-            )
-        );
+        $sections = DashboardRefreshScope::read($request, ['orders', 'products', 'customers', 'product_performance']);
+        $data = $dashboard->build($role, $isPreview, $sections);
+        return response()->json($sections === null ? $data : ['dashboard_update' => $data]);
     }
 
     public function updateOrderStatus(
