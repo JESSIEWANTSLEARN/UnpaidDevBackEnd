@@ -573,7 +573,7 @@ class ReturnController extends Controller
             $row->status === 'REFUND_PENDING'
         ) {
             $this->notifyRoles(
-                self::SALES_ROLES,
+                ['Sales_Manager'],
                 "Return #{$returnId} inspected",
                 "Return #{$returnId} is ready for refund processing."
             );

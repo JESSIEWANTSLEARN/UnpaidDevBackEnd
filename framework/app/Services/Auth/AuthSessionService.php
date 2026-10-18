@@ -135,6 +135,29 @@ class AuthSessionService
             'role' => $user->role,
         ]);
 
+        // Check revocation before initializing legacy activity timestamps.
+        $trackingId =
+            $request->session()->get('auth_session_id');
+
+        if ($trackingId) {
+            $row = DB::table('WBO_UserSessions')
+                ->where('session_id', $trackingId)
+                ->first();
+
+            if (
+                $row &&
+                (!(bool) $row->is_active || (int) $row->user_id !== $userId)
+            ) {
+                $this->invalidate(
+                    $request,
+                    'SESSION_REVOKED',
+                    'User session was revoked.'
+                );
+
+                return 'revoked';
+            }
+        }
+
         $lastActivity =
             (int) $request->session()->get(
                 'last_activity',
@@ -166,28 +189,6 @@ class AuthSessionService
             );
 
             return 'idle_timeout';
-        }
-
-        $trackingId =
-            $request->session()->get('auth_session_id');
-
-        if ($trackingId) {
-            $row = DB::table('WBO_UserSessions')
-                ->where('session_id', $trackingId)
-                ->first();
-
-            if (
-                $row &&
-                !(bool) $row->is_active
-            ) {
-                $this->invalidate(
-                    $request,
-                    'SESSION_REVOKED',
-                    'User session was revoked.'
-                );
-
-                return 'revoked';
-            }
         }
 
         $this->ensureTracked(
@@ -257,6 +258,7 @@ class AuthSessionService
         if ($trackingId) {
             DB::table('WBO_UserSessions')
                 ->where('session_id', $trackingId)
+                ->where('user_id', (int) $userId)
                 ->update([
                     'is_active' => false,
                     'logged_out_at' => now(),

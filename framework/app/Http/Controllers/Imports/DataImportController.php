@@ -148,6 +148,8 @@ class DataImportController extends Controller
             'preview' => $access['preview'],
             'allowed_types' =>
                 $access['allowed_types'],
+            'can_confirm' =>
+                !$access['preview'],
             'imports' => $payload,
         ]);
     }
@@ -162,7 +164,7 @@ class DataImportController extends Controller
             $request
         );
 
-        $this->authorizeWrite(
+        $this->authorizePreview(
             $validated['import_type']
         );
 
@@ -421,6 +423,12 @@ class DataImportController extends Controller
     }
 
     private function authorizeWrite(
+        string $type
+    ): WBOUser {
+        return $this->authorizePreview($type);
+    }
+
+    private function authorizePreview(
         string $type
     ): WBOUser {
         if (

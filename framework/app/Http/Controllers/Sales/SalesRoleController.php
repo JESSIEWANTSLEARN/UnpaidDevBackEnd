@@ -74,6 +74,12 @@ class SalesRoleController extends Controller
 
         $action = $validated['action'];
 
+        // Staff handle routine fulfillment; exception and payment decisions
+        // belong to the Sales Manager, regardless of the client UI.
+        if ($role === 'Sales_Staff' && !in_array($action, ['process', 'fulfill'], true)) {
+            abort(403, 'Sales Manager approval is required for this order action.');
+        }
+
         $result = DB::transaction(
             function () use (
                 $orderId,
