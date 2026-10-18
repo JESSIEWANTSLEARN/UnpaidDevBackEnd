@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Imports;
 use App\Http\Controllers\Controller;
 use App\Models\WBOUser;
 use App\Services\Imports\DataImportService;
+use App\Services\Inventory\InventoryUpdateService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -318,7 +319,12 @@ class DataImportController extends Controller
                     . "{$report['failed_rows']} failed."
             );
 
+            $inventoryUpdate = $type === 'INVENTORY'
+                ? app(InventoryUpdateService::class)->forBatches($report['inventory_batch_ids'] ?? [])
+                : null;
+
             return response()->json([
+                'inventory_update' => $inventoryUpdate,
                 'success' => true,
                 'message' =>
                     'Data import finished.',

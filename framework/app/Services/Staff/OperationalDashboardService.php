@@ -27,7 +27,7 @@ class OperationalDashboardService
             ->where(function ($query) {
                 $query
                     ->whereNull('expiry_date')
-                    ->orWhereDate(
+                    ->orWhere(
                         'expiry_date',
                         '>=',
                         now()->toDateString()
@@ -157,7 +157,7 @@ class OperationalDashboardService
                 'b.received_date',
                 'b.expiry_date'
             )
-            ->orderByDesc('b.received_date')
+            ->orderByDesc('b.received_date')->orderByDesc('b.batch_id')
             ->limit(100)
             ->get()
             ->map(function ($batch) {
@@ -202,7 +202,7 @@ class OperationalDashboardService
                 't.reference_note',
                 'u.name as performed_by'
             )
-            ->orderByDesc('t.timestamp')
+            ->orderByDesc('t.timestamp')->orderByDesc('t.transaction_id')
             ->limit(100)
             ->get()
             ->map(function ($transaction) {
@@ -273,7 +273,7 @@ class OperationalDashboardService
                 'po.approved_by_user_id',
                 'approver.name as approved_by'
             )
-            ->orderByDesc('po.created_at')
+            ->orderByDesc('po.created_at')->orderByDesc('po.po_id')->orderBy('pod.po_detail_id')
             ->limit(100)
             ->get()
             ->map(function ($po) {

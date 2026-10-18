@@ -5,6 +5,7 @@ namespace App\Http\Controllers\SuperAdmin;
 use App\Http\Controllers\Controller;
 use App\Services\SuperAdmin\SuperAdminReportService;
 use App\Services\Shared\NotificationService;
+use App\Services\Inventory\InventoryUpdateService;
 
 use App\Http\Controllers\Concerns\HandlesSuperAdminSupport;
 use Carbon\Carbon;
@@ -263,7 +264,7 @@ class SuperAdminDashboardController extends Controller
             ->where(function ($query) {
                 $query
                     ->whereNull('expiry_date')
-                    ->orWhereDate(
+                    ->orWhere(
                         'expiry_date',
                         '>=',
                         now()->toDateString()
@@ -459,27 +460,8 @@ class SuperAdminDashboardController extends Controller
             ->where('o.order_date', '>=', $monthStart)
             ->sum('od.quantity');
 
-        // STOCK TREND
-        $trendStart = now()->startOfWeek()->subWeeks(5);
-        $trendTransactions = DB::table('WBO_Transactions')
-            ->select('quantity_change', 'timestamp')
-            ->where('timestamp', '>=', $trendStart)
-            ->orderBy('timestamp')
-            ->get();
-
-        $stockTrend = collect(range(0, 5))->map(function ($weekOffset) use ($trendStart, $trendTransactions) {
-            $weekStart = Carbon::parse($trendStart)->copy()->addWeeks($weekOffset);
-            $weekEnd = $weekStart->copy()->endOfWeek();
-
-            $netMovement = $trendTransactions->filter(function ($transaction) use ($weekStart, $weekEnd) {
-                return Carbon::parse($transaction->timestamp)->betweenIncluded($weekStart, $weekEnd);
-            })->sum('quantity_change');
-
-            return [
-                'label' => $weekStart->format('M d'),
-                'net_movement' => (int) $netMovement
-            ];
-        })->values();
+        // Compute six stock-trend totals in SQL instead of hydrating the full movement history.
+        $stockTrend = app(InventoryUpdateService::class)->stockTrend();
 
         // USER ACTIVITY ANALYTICS
         // WBO_UserSessions timestamps are stored in UTC.

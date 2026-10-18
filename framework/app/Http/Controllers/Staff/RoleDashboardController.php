@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Staff;
 
 use App\Http\Controllers\Controller;
 use App\Services\Shared\NotificationService;
+use App\Services\Inventory\InventoryUpdateService;
 use App\Services\Staff\OperationalDashboardService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -62,7 +63,7 @@ class RoleDashboardController extends Controller
 
     public function stockIn(
         Request $request,
-        NotificationService $notifications
+        InventoryUpdateService $updates
     ): JsonResponse {
         $role = $this->authorizeAction([
             'Warehouse_Admin',
@@ -148,9 +149,8 @@ class RoleDashboardController extends Controller
             )
         );
 
-        $notifications->syncOperationalAlerts();
-
         return response()->json([
+            'inventory_update' => $updates->forBatches([$batchId]),
             'message' => 'Stock received successfully.',
             'batch_id' => $batchId,
         ], 201);
@@ -160,7 +160,7 @@ class RoleDashboardController extends Controller
     public function receivePurchaseOrder(
         Request $request,
         int $poId,
-        NotificationService $notifications
+        InventoryUpdateService $updates
     ): JsonResponse {
         $role = $this->authorizeAction([
             'Warehouse_Admin',
@@ -372,9 +372,8 @@ class RoleDashboardController extends Controller
             )
         );
 
-        $notifications->syncOperationalAlerts();
-
         return response()->json([
+            'inventory_update' => $updates->forBatches([$result['batch_id']], $poId),
             'message' =>
                 $result['new_status'] === 'RECEIVED'
                     ? 'Purchase order fully received and inventory updated.'
@@ -388,7 +387,7 @@ class RoleDashboardController extends Controller
     }
     public function adjustStock(
         Request $request,
-        NotificationService $notifications
+        InventoryUpdateService $updates
     ): JsonResponse {
         $role = $this->authorizeAction([
             'Inventory_Controller',
@@ -479,9 +478,8 @@ class RoleDashboardController extends Controller
             )
         );
 
-        $notifications->syncOperationalAlerts();
-
         return response()->json([
+            'inventory_update' => $updates->forBatches([$validated['batch_id']]),
             'message' => 'Inventory adjustment saved.',
             'new_quantity' => $result['new_quantity'],
         ]);
@@ -489,7 +487,7 @@ class RoleDashboardController extends Controller
 
     public function writeOffStock(
         Request $request,
-        NotificationService $notifications
+        InventoryUpdateService $updates
     ): JsonResponse {
         $role = $this->authorizeAction([
             'Inventory_Controller',
@@ -626,9 +624,8 @@ class RoleDashboardController extends Controller
             )
         );
 
-        $notifications->syncOperationalAlerts();
-
         return response()->json([
+            'inventory_update' => $updates->forBatches([$validated['batch_id']]),
             'message' =>
                 'Inventory write-off recorded successfully.',
             'new_quantity' =>
