@@ -61,6 +61,7 @@ class DataImportService
 
         $successful = 0;
         $errors = [];
+        $inventoryBatchIds = [];
 
         foreach ($review['rows'] as $row) {
             if (!$row['valid']) {
@@ -85,14 +86,14 @@ class DataImportService
             }
 
             try {
-                DB::transaction(
+                $batchId = DB::transaction(
                     function () use (
                         $type,
                         $row,
                         $userId,
                         $importId
                     ) {
-                        $this->saveRow(
+                        return $this->saveRow(
                             $type,
                             $row['data'],
                             $userId,
@@ -102,6 +103,9 @@ class DataImportService
                 );
 
                 $successful++;
+                if ($type === 'INVENTORY') {
+                    $inventoryBatchIds[] = (int) $batchId;
+                }
             } catch (\Throwable $exception) {
                 report($exception);
 
@@ -134,6 +138,7 @@ class DataImportService
             'failed_rows' =>
                 $failedRowNumbers,
             'errors' => $errors,
+            'inventory_batch_ids' => $inventoryBatchIds,
         ];
     }
 
@@ -142,8 +147,8 @@ class DataImportService
         array $row,
         int $userId,
         int $importId
-    ): void {
-        match ($type) {
+    ): ?int {
+        return match ($type) {
             'PRODUCTS' =>
                 $this->saveProduct($row),
             'SUPPLIERS' =>
@@ -338,7 +343,7 @@ class DataImportService
         array $row,
         int $userId,
         int $importId
-    ): void {
+    ): int {
         $product = $this->product(
             trim((string) $row['sku'])
         );
@@ -413,6 +418,8 @@ class DataImportService
             . '|'
             . mb_strtolower($batchNumber)
         ] = true;
+
+        return (int) $batchId;
     }
 
     private function requiredHeaders(

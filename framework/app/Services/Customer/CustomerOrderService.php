@@ -8,10 +8,11 @@ use Illuminate\Support\Facades\Schema;
 
 class CustomerOrderService
 {
-    public function forUser(int $userId): Collection
+    public function forUser(int $userId, ?int $orderId = null): Collection
     {
         $orders = DB::table('WBO_Orders')
             ->where('customer_user_id', $userId)
+            ->when($orderId !== null, fn ($query) => $query->where('order_id', $orderId))
             ->orderByDesc('order_date')
             ->get();
 

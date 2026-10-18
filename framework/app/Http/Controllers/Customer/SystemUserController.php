@@ -449,12 +449,24 @@ class SystemUserController extends Controller
         CustomerOrderService $orders
     ) {
         $user = $this->currentUser($request);
-
-        return response()->json([
+        $validated = $request->validate(['order_id' => ['sometimes', 'integer', 'min:1']]);
+        $payload = [
             'success' => true,
-            'orders' => $orders
-                ->forUser((int) $user->user_id),
-        ]);
+            'orders' => $orders->forUser((int) $user->user_id, isset($validated['order_id']) ? (int) $validated['order_id'] : null),
+        ];
+        if ($request->boolean('include_stats')) {
+            $stats = DB::table('WBO_Orders')->where('customer_user_id', $user->user_id)
+                ->selectRaw('COUNT(*) AS total_orders')
+                ->selectRaw("SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) AS pending_orders")
+                ->selectRaw("SUM(CASE WHEN status = 'FULFILLED' THEN 1 ELSE 0 END) AS fulfilled_orders")->first();
+            $payload['stats'] = [
+                'total_orders' => (int) ($stats->total_orders ?? 0),
+                'pending_orders' => (int) ($stats->pending_orders ?? 0),
+                'fulfilled_orders' => (int) ($stats->fulfilled_orders ?? 0),
+            ];
+            $payload['partial_order'] = isset($validated['order_id']);
+        }
+        return response()->json($payload);
     }
 
     public function placeOrder(

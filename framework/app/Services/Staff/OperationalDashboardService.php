@@ -3,6 +3,7 @@
 namespace App\Services\Staff;
 
 use Carbon\Carbon;
+use App\Support\DashboardRefreshScope;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -21,13 +22,14 @@ class OperationalDashboardService
         'PARTIALLY_RECEIVED',
     ];
 
-    public function build(string $role, bool $isPreview): array
+    public function build(string $role, bool $isPreview, ?array $sections = null): array
     {
+        $needs = fn (string $key) => $sections === null || in_array($key, $sections, true);
         $stockTotals = DB::table('WBO_Batches')
             ->where(function ($query) {
                 $query
                     ->whereNull('expiry_date')
-                    ->orWhereDate(
+                    ->orWhere(
                         'expiry_date',
                         '>=',
                         now()->toDateString()
@@ -41,7 +43,7 @@ class OperationalDashboardService
             )
             ->groupBy('product_id');
 
-        $products = DB::table('WBO_Products as p')
+        $products = $needs('products') ? DB::table('WBO_Products as p')
             ->leftJoin(
                 'WBO_Categories as c',
                 'c.category_id',
@@ -99,9 +101,9 @@ class OperationalDashboardService
                 $product->category =
                     $product->category ?: 'Uncategorized';
                 return $product;
-            });
+            }) : collect();
 
-        $suppliers = DB::table('WBO_Suppliers as s')
+        $suppliers = $needs('suppliers') ? DB::table('WBO_Suppliers as s')
             ->leftJoin(
                 'WBO_Products as p',
                 'p.supplier_id',
@@ -137,9 +139,9 @@ class OperationalDashboardService
                 $supplier->product_count =
                     (int) $supplier->product_count;
                 return $supplier;
-            });
+            }) : collect();
 
-        $batches = DB::table('WBO_Batches as b')
+        $batches = $needs('batches') ? DB::table('WBO_Batches as b')
             ->join(
                 'WBO_Products as p',
                 'p.product_id',
@@ -157,7 +159,7 @@ class OperationalDashboardService
                 'b.received_date',
                 'b.expiry_date'
             )
-            ->orderByDesc('b.received_date')
+            ->orderByDesc('b.received_date')->orderByDesc('b.batch_id')
             ->limit(100)
             ->get()
             ->map(function ($batch) {
@@ -166,9 +168,9 @@ class OperationalDashboardService
                 $batch->current_quantity =
                     (int) $batch->current_quantity;
                 return $batch;
-            });
+            }) : collect();
 
-        $transactions = DB::table('WBO_Transactions as t')
+        $transactions = $needs('transactions') ? DB::table('WBO_Transactions as t')
             ->join(
                 'WBO_Batches as b',
                 'b.batch_id',
@@ -202,16 +204,16 @@ class OperationalDashboardService
                 't.reference_note',
                 'u.name as performed_by'
             )
-            ->orderByDesc('t.timestamp')
+            ->orderByDesc('t.timestamp')->orderByDesc('t.transaction_id')
             ->limit(100)
             ->get()
             ->map(function ($transaction) {
                 $transaction->quantity_change =
                     (int) $transaction->quantity_change;
                 return $transaction;
-            });
+            }) : collect();
 
-        $purchaseOrders = DB::table('WBO_PurchaseOrders as po')
+        $purchaseOrders = $needs('purchase_orders') ? DB::table('WBO_PurchaseOrders as po')
             ->join(
                 'WBO_Suppliers as s',
                 's.supplier_id',
@@ -273,7 +275,7 @@ class OperationalDashboardService
                 'po.approved_by_user_id',
                 'approver.name as approved_by'
             )
-            ->orderByDesc('po.created_at')
+            ->orderByDesc('po.created_at')->orderByDesc('po.po_id')->orderBy('pod.po_detail_id')
             ->limit(100)
             ->get()
             ->map(function ($po) {
@@ -292,7 +294,7 @@ class OperationalDashboardService
                         ? null
                         : (int) $po->approved_by_user_id;
                 return $po;
-            });
+            }) : collect();
 
         $orderTotals = DB::table('WBO_OrderDetails')
             ->select(
@@ -306,7 +308,7 @@ class OperationalDashboardService
             )
             ->groupBy('order_id');
 
-        $orders = DB::table('WBO_Orders as o')
+        $orders = $needs('orders') ? DB::table('WBO_Orders as o')
             ->leftJoinSub(
                 $orderTotals,
                 'totals',
@@ -337,7 +339,7 @@ class OperationalDashboardService
                 $order->total_quantity =
                     (int) $order->total_quantity;
                 return $order;
-            });
+            }) : collect();
 
         $lowStockProducts = $products
             ->filter(
@@ -530,7 +532,25 @@ class OperationalDashboardService
             ]);
         }
 
-        return [
+        $groups = [
+            'products' => ['total_products', 'total_stock', 'low_stock_items', 'out_of_stock', 'reorder_needs'],
+            'suppliers' => ['active_suppliers'],
+            'purchase_orders' => ['open_purchase_orders', 'pending_approval_pos', 'ordered_pos'],
+            'orders' => ['pending_orders'],
+            'transactions' => ['stock_movements_today', 'receipts_today'],
+            'batches' => ['expiring_batches'],
+        ];
+        $alertGroups = [
+            'products' => ['Out of Stock', 'Low Stock'],
+            'purchase_orders' => ['Purchase Orders Awaiting Approval', 'Open Purchase Orders'],
+            'orders' => ['Pending Sales Orders'],
+            'batches' => ['Expiry Watch'],
+        ];
+        $alertTitles = [];
+        foreach ($sections ?? array_keys($alertGroups) as $section) {
+            $alertTitles = array_merge($alertTitles, $alertGroups[$section] ?? []);
+        }
+        $result = [
             'role' => $role,
             'preview' => $isPreview,
             'current_user_id' =>
@@ -555,6 +575,15 @@ class OperationalDashboardService
                 $purchaseOrders,
             'orders' => $orders,
         ];
+        if ($sections === null) return $result;
+        $keys = array_merge($sections, ['metrics', 'alerts']);
+        if ($needs('products')) $keys = array_merge($keys, ['reorder_needs', 'low_stock_products', 'out_of_stock_products']);
+        if ($needs('batches')) $keys[] = 'expiring_batches';
+        $result = array_intersect_key($result, array_flip($keys));
+        $result['metrics'] = DashboardRefreshScope::metrics($metrics, $sections, $groups);
+        $result['alerts'] = $alerts->whereIn('title', $alertTitles)->values();
+        $result['replace_alert_titles'] = $alertTitles;
+        return $result;
 
     }
 }

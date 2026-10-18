@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\SuperAdmin;
 
 use App\Http\Controllers\Controller;
+use App\Services\Inventory\InventoryUpdateService;
 use App\Http\Controllers\Concerns\HandlesSuperAdminSupport;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -327,7 +328,7 @@ class SuperAdminCatalogController extends Controller
             'message' => 'Category updated successfully.',
         ]);
     }
-    public function stockIn(Request $request): JsonResponse
+    public function stockIn(Request $request, InventoryUpdateService $updates): JsonResponse
     {
         $this->authorizeSuperAdmin();
 
@@ -380,6 +381,7 @@ class SuperAdminCatalogController extends Controller
         );
 
         return response()->json([
+            'inventory_update' => $updates->forBatches([$batchId]),
             'message' => 'Stock received successfully.',
             'batch_id' => $batchId,
         ], 201);

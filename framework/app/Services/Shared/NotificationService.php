@@ -10,6 +10,9 @@ use Illuminate\Support\Facades\Schema;
 /** Cross-domain notification and inventory/order alert service. */
 class NotificationService
 {
+    /** State primed only for products/batches participating in the current check. */
+    private array $stateCache = [];
+
     private const LOW_STOCK_THRESHOLD = 10;
     private const EXPIRY_WARNING_DAYS = 30;
 
@@ -108,30 +111,29 @@ class NotificationService
         }
     }
 
-    public function syncOperationalAlerts(): void
+    public function syncOperationalAlerts(?array $productIds = null): void
     {
-        if (!$this->ready()) {
+        if (!$this->ready() || !Schema::hasTable('WBO_Products') || !Schema::hasTable('WBO_Batches')) {
             return;
         }
 
-        $this->syncProductStockAlerts();
-        $this->syncExpiryAlerts();
+        if ($productIds === []) return;
+        $this->primeStates(['system:catalog-notification-baseline']);
+        // Initialize the catalog baseline once before allowing a scoped stock check.
+        $stockScope = $productIds !== null && !$this->hasState('system:catalog-notification-baseline')
+            ? null : $productIds;
+        $this->syncProductStockAlerts($stockScope);
+        $this->syncExpiryAlerts($productIds);
     }
 
-    private function syncProductStockAlerts(): void
+    private function syncProductStockAlerts(?array $productIds = null): void
     {
-        if (
-            !Schema::hasTable('WBO_Products') ||
-            !Schema::hasTable('WBO_Batches')
-        ) {
-            return;
-        }
-
         $stockTotals = DB::table('WBO_Batches')
+            ->when($productIds !== null, fn ($query) => $query->whereIn('product_id', $productIds ?? []))
             ->where(function ($query) {
                 $query
                     ->whereNull('expiry_date')
-                    ->orWhereDate(
+                    ->orWhere(
                         'expiry_date',
                         '>=',
                         now()->toDateString()
@@ -144,6 +146,7 @@ class NotificationService
             ->groupBy('product_id');
 
         $products = DB::table('WBO_Products as p')
+            ->when($productIds !== null, fn ($query) => $query->whereIn('p.product_id', $productIds ?? []))
             ->leftJoinSub(
                 $stockTotals,
                 'stock',
@@ -164,6 +167,13 @@ class NotificationService
                 )
             )
             ->get();
+
+        $keys = [];
+        foreach ($products as $product) {
+            $keys[] = "published:{$product->product_id}";
+            $keys[] = "stock-level:{$product->product_id}";
+        }
+        $this->primeStates($keys);
 
         $catalogBaselineExists =
             $this->hasState('system:catalog-notification-baseline');
@@ -275,20 +285,14 @@ class NotificationService
         }
     }
 
-    private function syncExpiryAlerts(): void
+    private function syncExpiryAlerts(?array $productIds = null): void
     {
-        if (
-            !Schema::hasTable('WBO_Batches') ||
-            !Schema::hasTable('WBO_Products')
-        ) {
-            return;
-        }
-
         $cutoff = now()
             ->addDays(self::EXPIRY_WARNING_DAYS)
             ->endOfDay();
 
         $batches = DB::table('WBO_Batches as b')
+            ->when($productIds !== null, fn ($query) => $query->whereIn('b.product_id', $productIds ?? []))
             ->join(
                 'WBO_Products as p',
                 'p.product_id',
@@ -307,6 +311,10 @@ class NotificationService
                 'p.name as product_name'
             )
             ->get();
+
+        $this->primeStates($batches->map(fn ($batch) =>
+            "expiry:{$batch->batch_id}:" . Carbon::parse((string) $batch->expiry_date)->format('Y-m-d')
+        )->all());
 
         $activeBatchIds = [];
 
@@ -349,6 +357,7 @@ class NotificationService
         }
 
         $query = DB::table('WBO_Notifications')
+            ->when($productIds !== null, fn ($query) => $query->whereIn('related_product_id', $productIds ?? []))
             ->where('alert_tier', 'Expiry')
             ->whereNotNull('related_batch_id')
             ->where('status', '<>', 'RESOLVED');
@@ -572,8 +581,21 @@ class NotificationService
             Schema::hasTable('WBO_Users');
     }
 
+    private function primeStates(array $keys): void
+    {
+        $keys = array_values(array_filter(array_unique($keys), fn ($key) => !array_key_exists($key, $this->stateCache)));
+        if ($keys === []) return;
+        // Bound parameters for large catalogs and SQLite/MySQL portability.
+        foreach (array_chunk($keys, 900) as $chunk) {
+            $rows = DB::table('WBO_NotificationState')->whereIn('state_key', $chunk)
+                ->get(['state_key', 'state_value'])->keyBy('state_key');
+            foreach ($chunk as $key) $this->stateCache[$key] = $rows->get($key);
+        }
+    }
+
     private function hasState(string $key): bool
     {
+        if (array_key_exists($key, $this->stateCache)) return $this->stateCache[$key] !== null;
         return DB::table('WBO_NotificationState')
             ->where('state_key', $key)
             ->exists();
@@ -581,6 +603,10 @@ class NotificationService
 
     private function stateValue(string $key): ?string
     {
+        if (array_key_exists($key, $this->stateCache)) {
+            $value = $this->stateCache[$key]->state_value ?? null;
+            return $value === null ? null : (string) $value;
+        }
         $value = DB::table('WBO_NotificationState')
             ->where('state_key', $key)
             ->value('state_value');
@@ -600,5 +626,6 @@ class NotificationService
                     'updated_at' => now(),
                 ]
             );
+        $this->stateCache[$key] = (object) ['state_key' => $key, 'state_value' => $value];
     }
 }

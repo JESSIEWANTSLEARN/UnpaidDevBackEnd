@@ -3,6 +3,7 @@
 namespace App\Services\Sales;
 
 use Illuminate\Support\Facades\DB;
+use App\Support\DashboardRefreshScope;
 
 /**
  * Builds the read-only Sales Manager / Sales Staff dashboard payload.
@@ -12,14 +13,15 @@ class SalesDashboardService
 {
     private const LOW_STOCK_THRESHOLD = 10;
 
-    public function build(string $role, bool $isPreview): array
+    public function build(string $role, bool $isPreview, ?array $sections = null): array
     {
+        $needs = fn (string $key) => $sections === null || in_array($key, $sections, true);
         $stockTotals =
             DB::table('WBO_Batches')
                 ->where(function ($query) {
                     $query
                         ->whereNull('expiry_date')
-                        ->orWhereDate(
+                        ->orWhere(
                             'expiry_date',
                             '>=',
                             now()->toDateString()
@@ -35,7 +37,7 @@ class SalesDashboardService
                     'product_id'
                 );
 
-        $products =
+        $products = $needs('products') ?
             DB::table('WBO_Products as p')
                 ->leftJoin(
                     'WBO_Categories as c',
@@ -87,9 +89,9 @@ class SalesDashboardService
                         'Uncategorized';
 
                     return $product;
-                });
+                }) : collect();
 
-        $details =
+        $details = $needs('orders') ?
             DB::table(
                 'WBO_OrderDetails as od'
             )
@@ -108,15 +110,19 @@ class SalesDashboardService
                     'od.quantity',
                     'od.unit_price'
                 )
+                ->whereIn('od.order_id', DB::query()->fromSub(
+                    DB::table('WBO_Orders')->select('order_id')->orderByDesc('order_date')->orderByDesc('order_id')->limit(150),
+                    'visible_orders'
+                )->select('order_id'))
                 ->orderBy(
                     'od.order_detail_id'
                 )
                 ->get()
                 ->groupBy(
                     'order_id'
-                );
+                ) : collect();
 
-        $orders =
+        $orders = $needs('orders') ?
             DB::table('WBO_Orders as o')
                 ->leftJoin(
                     'WBO_Users as u',
@@ -142,7 +148,7 @@ class SalesDashboardService
                 )
                 ->orderByDesc(
                     'o.order_date'
-                )
+                )->orderByDesc('o.order_id')
                 ->limit(150)
                 ->get()
                 ->map(
@@ -253,9 +259,9 @@ class SalesDashboardService
                                 $items,
                         ];
                     }
-                );
+                ) : collect();
 
-        $customers =
+        $customers = $needs('customers') ?
             DB::table('WBO_Users as u')
                 ->leftJoin(
                     'WBO_Orders as o',
@@ -322,9 +328,9 @@ class SalesDashboardService
                         $customer->total_spent;
 
                     return $customer;
-                });
+                }) : collect();
 
-        $productPerformance =
+        $productPerformance = $needs('product_performance') ?
             DB::table(
                 'WBO_OrderDetails as od'
             )
@@ -379,47 +385,51 @@ class SalesDashboardService
                         $row->order_count;
 
                     return $row;
-                });
+                }) : collect();
 
         $monthStart =
             now()->startOfMonth();
 
-        $monthlyRevenue =
-            DB::table(
-                'WBO_Orders as o'
-            )
-                ->join(
-                    'WBO_OrderDetails as od',
-                    'od.order_id',
-                    '=',
-                    'o.order_id'
+        $monthlyRevenue = $monthlyFulfilled = 0;
+        if ($needs('orders')) {
+            $monthlyRevenue =
+                DB::table(
+                    'WBO_Orders as o'
                 )
-                ->where(
-                    'o.status',
-                    'FULFILLED'
-                )
-                ->where(
-                    'o.order_date',
-                    '>=',
-                    $monthStart
-                )
-                ->selectRaw(
-                    'COALESCE(SUM(od.quantity * od.unit_price), 0) AS total'
-                )
-                ->value('total');
+                    ->join(
+                        'WBO_OrderDetails as od',
+                        'od.order_id',
+                        '=',
+                        'o.order_id'
+                    )
+                    ->where(
+                        'o.status',
+                        'FULFILLED'
+                    )
+                    ->where(
+                        'o.order_date',
+                        '>=',
+                        $monthStart
+                    )
+                    ->selectRaw(
+                        'COALESCE(SUM(od.quantity * od.unit_price), 0) AS total'
+                    )
+                    ->value('total');
 
-        $monthlyFulfilled =
-            DB::table('WBO_Orders')
-                ->where(
-                    'status',
-                    'FULFILLED'
-                )
-                ->where(
-                    'order_date',
-                    '>=',
-                    $monthStart
-                )
-                ->count();
+            $monthlyFulfilled =
+                DB::table('WBO_Orders')
+                    ->where(
+                        'status',
+                        'FULFILLED'
+                    )
+                    ->where(
+                        'order_date',
+                        '>=',
+                        $monthStart
+                    )
+                    ->count();
+
+        }
 
         $lowStock =
             $products
@@ -536,7 +546,7 @@ class SalesDashboardService
             ]);
         }
 
-        return [
+        $result = [
             'role' => $role,
             'preview' => $isPreview,
             'low_stock_threshold' =>
@@ -552,6 +562,20 @@ class SalesDashboardService
             'low_stock_products' =>
                 $lowStock,
         ];
+        if ($sections === null) return $result;
+        $keys = array_merge($sections, ['metrics', 'alerts']);
+        if ($needs('products')) $keys[] = 'low_stock_products';
+        $result = array_intersect_key($result, array_flip($keys));
+        $result['metrics'] = DashboardRefreshScope::metrics($metrics, $sections, [
+            'orders' => ['total_orders', 'pending_orders', 'processing_orders', 'fulfilled_orders', 'unfulfilled_orders', 'cancelled_orders', 'monthly_revenue', 'monthly_fulfilled'],
+            'customers' => ['customers'], 'products' => ['low_stock_products'],
+        ]);
+        $titles = [];
+        if ($needs('orders')) $titles = ['Orders Awaiting Review', 'Unfulfilled Orders', 'Orders in Processing'];
+        if ($needs('products')) $titles[] = 'Fulfillment Stock Risk';
+        $result['replace_alert_titles'] = $titles;
+        $result['alerts'] = $alerts->whereIn('title', $titles)->values();
+        return $result;
 
     }
 }

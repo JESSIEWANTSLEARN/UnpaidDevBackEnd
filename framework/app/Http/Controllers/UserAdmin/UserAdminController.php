@@ -46,9 +46,12 @@ class UserAdminController extends Controller
     public function dashboard(Request $request): JsonResponse
     {
         $isPreview = $this->authorizeRead($request);
+        $validated = $request->validate(['user_id' => ['sometimes', 'integer', 'min:1']]);
+        $targetId = isset($validated['user_id']) ? (int) $validated['user_id'] : null;
 
         $users = DB::table('WBO_Users as u')
             ->where('u.role', '<>', 'super_admin')
+            ->when($targetId !== null, fn ($query) => $query->where('u.user_id', $targetId))
             ->select(
                 'u.user_id',
                 'u.name',
@@ -72,6 +75,7 @@ class UserAdminController extends Controller
 
         if (Schema::hasTable('WBO_UserSessions')) {
             $sessionSummary = DB::table('WBO_UserSessions')
+                ->when($targetId !== null, fn ($query) => $query->where('user_id', $targetId))
                 ->select(
                     'user_id',
                     DB::raw(
@@ -111,6 +115,23 @@ class UserAdminController extends Controller
         $statusCounts = $users
             ->groupBy('account_status')
             ->map(fn($rows) => $rows->count());
+
+        $totalUsers = $users->count();
+        $activeSessions = (int) $users->sum('active_sessions');
+        $staffAccounts = $users->where('role', '<>', 'System_User')->count();
+        if ($targetId !== null) {
+            // Global counters remain global without retrieving every account/session row.
+            $roleCounts = DB::table('WBO_Users')->where('role', '<>', 'super_admin')
+                ->select('role', DB::raw('COUNT(*) AS total'))->groupBy('role')->pluck('total', 'role')->map(fn ($count) => (int) $count);
+            $statusCounts = DB::table('WBO_Users')->where('role', '<>', 'super_admin')
+                ->select('account_status', DB::raw('COUNT(*) AS total'))->groupBy('account_status')->pluck('total', 'account_status')->map(fn ($count) => (int) $count);
+            $totalUsers = (int) $roleCounts->sum();
+            $staffAccounts = $totalUsers - (int) $roleCounts->get('System_User', 0);
+            $activeSessions = Schema::hasTable('WBO_UserSessions')
+                ? DB::table('WBO_UserSessions as s')->join('WBO_Users as u', 'u.user_id', '=', 's.user_id')
+                    ->where('u.role', '<>', 'super_admin')->where('s.is_active', true)->count()
+                : 0;
+        }
 
         $recentAccess = collect();
 
@@ -166,6 +187,7 @@ class UserAdminController extends Controller
 
         return response()->json([
             'preview' => $isPreview,
+            'partial_users' => $targetId !== null,
             'current_user_id' =>
                 (int) session('user_id'),
             'manageable_roles' =>
@@ -173,7 +195,7 @@ class UserAdminController extends Controller
             'account_statuses' =>
                 self::ACCOUNT_STATUSES,
             'metrics' => [
-                'total_users' => $users->count(),
+                'total_users' => $totalUsers,
                 'active_users' =>
                     $statusCounts->get(
                         'active',
@@ -190,17 +212,9 @@ class UserAdminController extends Controller
                         0
                     ),
                 'active_sessions' =>
-                    (int) $users->sum(
-                        'active_sessions'
-                    ),
+                    $activeSessions,
                 'staff_accounts' =>
-                    $users
-                        ->where(
-                            'role',
-                            '<>',
-                            'System_User'
-                        )
-                        ->count(),
+                    $staffAccounts,
                 'customer_accounts' =>
                     $roleCounts->get(
                         'System_User',
