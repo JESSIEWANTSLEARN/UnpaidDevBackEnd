@@ -47,26 +47,9 @@ try {
 // GMAIL SMTP
 // TEMPORARY CONFIGURATION
 // =====================================================
-
-define(
-    'SMTP_HOST',
-    'smtp.gmail.com'
-);
-
-define(
-    'SMTP_PORT',
-    587
-);
-
-define(
-    'SMTP_USERNAME',
-    'palaraojessie19@gmail.com'
-);
-
-define(
-    'SMTP_APP_PASSWORD',
-    'zlqexedrjynqvrpb'
-);
+define('SMTP_HOST', 'smtp.gmail.com');
+define('SMTP_USERNAME', 'your-email@gmail.com');
+define('SMTP_PASSWORD', 'EXPOSED_PASSWORD');
 
 define(
     'SMTP_FROM_NAME',
